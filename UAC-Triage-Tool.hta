@@ -1,0 +1,2076 @@
+<!doctype html>
+<html>
+<head>
+<meta http-equiv="x-ua-compatible" content="IE=edge">
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<title>UAC Triage Tool</title>
+<HTA:APPLICATION
+  ID="uacHta"
+  APPLICATIONNAME="UAC Triage Tool"
+  BORDER="thick"
+  CAPTION="yes"
+  SCROLL="auto"
+  SINGLEINSTANCE="no"
+  SHOWINTASKBAR="yes"
+  MAXIMIZEBUTTON="yes"
+  MINIMIZEBUTTON="yes"
+  INNERBORDER="no"
+  CONTEXTMENU="yes"
+  SELECTION="yes" />
+<!--
+  UAC (Unix-like Artifacts Collector, github.com/tclahr/uac) OUTPUT TRIAGE - first non-Windows
+  member of the DFIR-Artifact-Finder wrapper family. Ingests a uac-<host>-<os>-<ts>.tar.gz /
+  .zip / .tar (or an already-extracted folder) full of plain-text command output + a mirrored
+  [root] filesystem, and turns it into scored Processes / Network / Timeline / IOC views.
+
+  GROUND-TRUTH (real ir_triage capture, UAC 3.3.0, 2026-07-07 - see BUILD-NOTES-ground-truth.md):
+   * Extraction uses Windows' built-in bsdtar (C:\Windows\System32\tar.exe), which transparently
+     handles .tar/.tar.gz/.zip. bsdtar EXITS 1 on every UAC tarball because the archive carries
+     Unix symlinks ([root]/etc/alternatives/* …) Windows can't create - the regular files all
+     extract fine. Success test = uac.log exists in the extract dir, NEVER the exit code.
+   * bsdtar cannot open password-protected zips (UAC -P) - detected and reported (use 7-Zip).
+   * Collected files mirror under a directory literally named "[root]" (real brackets). FSO/JScript
+     cope; the extraction .bat quotes paths and never wildcards them.
+   * Output file naming: "<command>_<args, spaces->underscores>.txt".
+     Processes: live_response/process/ps_-ef.txt (UID PID PPID C STIME TTY TIME CMD), enriched by
+       ps_-axo_pid_user_lstart_args.txt (full start), running_processes_full_paths.txt (/proc/<pid>/exe
+       -> target), hash_running_processes.sha1 (<sha1>  /proc/<pid>/exe), hidden_pids_for_ps_command.txt.
+     Network: live_response/network/ss_-tanp.txt (tcp) + ss_-uanp.txt (udp); fallback netstat_-anp.txt.
+     Timeline: bodyfile/bodyfile.txt - TSK 3.x  MD5|name|inode|mode|UID|GID|size|atime|mtime|ctime|crtime
+       (epoch secs; MD5 field literally "0"; 158,739 rows on a MINIMAL box -> cap + window prefilter).
+     Metadata: uac.log header block ("YYYY-MM-DD HH:MM:SS +ZZZZ INF Key: Value"); CMD lines append
+       stderr after " 2> " - Terminated/timeout lines are normal on hosts with broken tools.
+   * No engine to download and NO SSH - this wrapper never runs UAC and never touches the target.
+-->
+<style>
+  html{margin:0;height:100%;background:#0d1117}
+  body{margin:0;height:100%;background:#0d1117;color:#e6edf3;font-family:Segoe UI,Tahoma,sans-serif;font-size:16px}
+  #content{zoom:0.9}
+  a{color:#58a6ff}
+  .mono{font-family:Consolas,"Courier New",monospace}
+  .muted{color:#8b949e}
+  .err{color:#f85149}
+  .ok{color:#3fb950}
+  header{padding:8px 14px;background:#161b22;border-bottom:1px solid #30363d}
+  header h1{display:inline-block;font-size:15px;margin:0;font-weight:600;vertical-align:middle}
+  header h1 small{color:#8b949e;font-weight:400}
+  .pill{display:inline-block;font-size:11px;color:#8b949e;border:1px solid #30363d;border-radius:20px;padding:2px 10px;margin-left:8px;vertical-align:middle}
+  .wrap{padding:12px 14px}
+  .card{background:#161b22;border:1px solid #30363d;border-radius:8px;padding:12px;margin-bottom:12px}
+  .card h3{margin:0 0 8px;font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:#8b949e}
+  label.fld{display:block;margin:6px 0 2px;font-size:11px;color:#8b949e}
+  input.txt,select,textarea{background:#1c2330;border:1px solid #30363d;color:#e6edf3;border-radius:6px;padding:5px 8px;font-size:13px;font-family:Consolas,monospace}
+  input.wide{width:62%}
+  .btn{background:#1c2330;border:1px solid #30363d;color:#e6edf3;border-radius:6px;padding:6px 12px;font-size:13px;cursor:pointer;margin:2px}
+  .btn:hover{border-color:#58a6ff}
+  .btn.primary{background:#1f6feb;border-color:#1f6feb}
+  .btn.on{background:#1f6feb;border-color:#1f6feb;color:#fff}
+  .row{white-space:nowrap}
+  .stat{display:inline-block;background:#1c2330;border:1px solid #30363d;border-radius:8px;padding:6px 12px;margin:0 6px 6px 0;min-width:70px;vertical-align:top}
+  .stat .n{font-size:17px;font-weight:700;display:block}
+  .stat .l{font-size:10px;color:#8b949e;text-transform:uppercase;letter-spacing:.5px}
+  .stat.flag{border-color:#8b3a3a}.stat.flag .n{color:#ff6b6b}
+  .stat.warn{border-color:#8a7a2a}.stat.warn .n{color:#e3b341}
+  .cards3{width:100%}
+  .col3{display:inline-block;width:32%;vertical-align:top;margin-right:1%}
+  .kvgrid div{margin:2px 0;font-size:12px}
+  .kvgrid .k{display:inline-block;width:130px;color:#8b949e}
+  table{width:100%;border-collapse:collapse;font-size:12px}
+  th,td{text-align:left;padding:4px 7px;border-bottom:1px solid #30363d;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  th{background:#1c2330;cursor:pointer;color:#c9d1d9;position:relative;z-index:3;box-shadow:0 1px 0 #30363d}
+  th:hover{color:#58a6ff}
+  /* grip sits flush at the th's right edge (right:0, NOT -4px) - th has overflow:hidden, which
+     would clip an overhanging grip and leave almost nothing to grab (family lesson from Amcache) */
+  .cgrip{position:absolute;top:0;right:0;width:10px;height:100%;cursor:col-resize;z-index:6}
+  .cgrip:hover{background:#58a6ff;filter:alpha(opacity=55);opacity:.55}
+  th:hover .cgrip{background:#30456a;filter:alpha(opacity=60);opacity:.6}
+  td{max-width:520px}
+  tr.row-flag td{background:#2a1416}
+  tr.row-warn td{background:#241c12}
+  tr.ioc td.first{border-left:3px solid #ff6b6b}
+  tr.sel td{background:#1c2f4a}
+  .scroll{max-height:58vh;overflow:auto;border:1px solid #30363d;border-radius:8px}
+  .tag{display:inline-block;font-size:10px;padding:1px 6px;border-radius:10px;font-weight:600;margin-right:3px}
+  .tag.ioc{background:#3a1416;color:#ff6b6b;border:1px solid #ff6b6b}
+  .tag.sus{background:#3a2a10;color:#f0883e;border:1px solid #8a5a2a}
+  .tag.info{background:#21262d;color:#8b949e;border:1px solid #30363d}
+  .sc{display:inline-block;min-width:20px;text-align:center;font-weight:700;border-radius:6px;padding:1px 6px;margin-right:4px;font-size:11px}
+  .sc0{background:#21262d;color:#8b949e}
+  .sc1{background:#20301f;color:#7ee787}
+  .sc3{background:#3a2a10;color:#f0883e}
+  .sc5{background:#3a1416;color:#ff6b6b}
+  .dl{font-family:Consolas,"Courier New",monospace;font-size:11px;max-height:300px;overflow:auto;background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:6px;margin:4px 0;white-space:pre-wrap;word-break:break-word}
+  .kv{color:#8b949e}
+  .hl-ioc{color:#ff6b6b;font-weight:700}
+  .pgrid td{white-space:normal}
+  .pgood{color:#3fb950}.pmiss{color:#8b949e}.pflag{color:#ff6b6b;font-weight:700}
+  #log{white-space:pre-wrap;font-family:Consolas,monospace;font-size:11px;color:#8b949e;max-height:150px;overflow:auto;background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:8px;display:none;margin-top:8px}
+  .hide{display:none}
+  .lnk{cursor:pointer;color:#58a6ff}
+  .lnk:hover{text-decoration:underline}
+  .sep{display:inline-block;width:1px;height:18px;background:#30363d;margin:0 6px;vertical-align:middle}
+  .modal{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.66);z-index:1000;overflow:auto}
+  .modal .mcard{max-width:820px;margin:36px auto;background:#161b22;border:1px solid #30363d;border-radius:10px;padding:18px 22px}
+  .modal h2{margin:0 0 6px;font-size:18px;font-weight:600}
+  .modal h3{margin:12px 0 4px;font-size:12px;text-transform:uppercase;letter-spacing:.5px;color:#8b949e}
+  .modal ul{margin:4px 0;padding-left:20px}.modal li{margin:3px 0;font-size:13px}
+  .modal p{font-size:13px;margin:6px 0}
+  .modal code{background:#0d1117;border:1px solid #30363d;border-radius:4px;padding:2px 6px;font-family:Consolas,monospace;font-size:12px}
+  .modal .x{float:right;cursor:pointer;color:#8b949e;font-size:22px;line-height:1}.modal .x:hover{color:#e6edf3}
+  .modal .gh{font-family:Consolas,monospace;font-size:12px}
+</style>
+</head>
+<body>
+<header>
+  <h1>UAC Triage Tool <small>- Unix-like Artifacts Collector triage <span id="appver"></span></small></h1>
+  <span class="pill" id="verpill">tar: checking&hellip;</span>
+  <span class="pill" id="srcpill">no capture loaded</span>
+  <span style="float:right">
+    <button class="btn" id="helpBtn" onclick="openHelp()" title="Help, about &amp; GitHub link">Help</button>
+    <button class="btn primary hide" id="selfUpd" onclick="doSelfUpdate()" title="A newer version is available on GitHub">Update</button>
+    <button class="btn" id="fdown" title="Smaller text">A&minus;</button>
+    <button class="btn" id="fup" title="Larger text">A+</button>
+  </span>
+</header>
+
+<div class="wrap" id="content">
+
+  <!-- CONTROL PANEL -->
+  <div class="card">
+    <h3>UAC capture</h3>
+    <div class="muted" id="exeline" style="font-size:11px;margin-bottom:6px"></div>
+    <label class="fld" title="A uac-*.tar.gz / .tar / .zip archive, OR a folder you already extracted (one containing uac.log). Extraction uses Windows' built-in tar.exe.">UAC output - archive (uac-*.tar.gz / .zip) or an already-extracted folder</label>
+    <input class="txt wide" id="inPath" value="">
+    <input type="file" id="inPick" style="display:none">
+    <button class="btn" id="browseBtn">Browse&hellip;</button>
+    <button class="btn" id="folderBtn" title="Pick an already-extracted UAC folder (contains uac.log) instead of an archive.">Pick folder&hellip;</button>
+    <label class="fld" title="Required. Guessed from the uac-<hostname>-<os>-<timestamp> archive name - overwrite it if the guess is wrong. Names the output folder _Processed\&lt;host&gt;\UAC next to this app.">Target hostname (required) - names the output folder _Processed\&lt;host&gt;\UAC next to this app</label>
+    <input class="txt" id="hostName" value="" style="width:260px" placeholder="e.g. web01">
+    <label class="fld">Output directory (extraction + runinfo land here)</label>
+    <input class="txt wide" id="outDir" value="">
+    <button class="btn" id="openDirBtn">Open folder</button>
+    <div style="margin-top:10px">
+      <button class="btn primary" id="procBtn" title="Extract (if an archive) and parse the capture into the triage views.">Analyze capture</button>
+      <span class="sep"></span>
+      <button class="btn" id="iocBtn2" title="Edit the IOC / keyword list used for scoring and the tree-wide sweep.">IOC / keywords&hellip;</button>
+      <button class="btn" id="logToggle">Show log</button>
+      <span class="muted" id="status" style="margin-left:8px"></span>
+    </div>
+    <div id="iocWrap" class="hide" style="margin-top:8px">
+      <label class="fld">IOC / keyword list - comma or newline separated; matched (case-insensitive substring) against process commands, IPs, file paths and swept file contents. Matches score +3 and light up red. SHA1-shaped terms also match running-process hashes.</label>
+      <textarea id="iocBox" rows="3" style="width:70%;vertical-align:top"></textarea>
+      <button class="btn" id="iocApply">Apply</button>
+      <button class="btn" id="iocLoad">Load file&hellip;</button>
+      <input type="file" id="iocPick" style="display:none">
+      <span class="muted" id="iocInfo" style="font-size:11px"></span>
+    </div>
+    <div id="log"></div>
+  </div>
+
+  <!-- RESULTS -->
+  <div id="results" class="hide">
+    <div class="card">
+      <div class="row" id="tabbar" style="margin-bottom:2px">
+        <button class="btn on" id="tabOverview" data-tab="overview">Overview</button>
+        <button class="btn" id="tabProc" data-tab="proc">Processes</button>
+        <button class="btn" id="tabNet" data-tab="net">Network</button>
+        <button class="btn" id="tabLogon" data-tab="logon">Logons</button>
+        <button class="btn" id="tabTime" data-tab="time">Timeline</button>
+        <button class="btn" id="tabIoc" data-tab="ioc">IOC hits</button>
+        <button class="btn" id="tabInv" data-tab="inv">Inventory</button>
+      </div>
+    </div>
+
+    <!-- OVERVIEW -->
+    <div class="card" id="ovCard">
+      <h3>Capture overview</h3>
+      <div class="cards3">
+        <div class="col3">
+          <h3>Run metadata</h3>
+          <div class="kvgrid" id="ovMeta"></div>
+        </div>
+        <div class="col3">
+          <h3>Datasets</h3>
+          <div id="ovStats"></div>
+        </div>
+        <div class="col3">
+          <h3>Top findings</h3>
+          <div id="ovTop" class="kvgrid"></div>
+        </div>
+      </div>
+      <div id="persFindWrap" class="hide">
+        <h3 style="margin-top:14px">Persistence findings <span class="muted" style="font-weight:400;text-transform:none">- command lines parsed from cron / systemd / authorized_keys / rc.local / ld.so.preload and scored</span></h3>
+        <div class="scroll" style="max-height:26vh"><table id="pfTbl"></table></div>
+      </div>
+      <div class="cards3" style="margin-top:12px">
+        <div class="col3" id="pkgWrap" style="width:49%">
+          <h3>Recent package installs <span class="muted" style="font-weight:400;text-transform:none" id="pkgWinLbl"></span></h3>
+          <div class="scroll" style="max-height:24vh"><table id="pkgTbl"></table></div>
+        </div>
+        <div class="col3" id="ctrWrap" style="width:49%">
+          <h3>Containers</h3>
+          <div class="scroll" style="max-height:24vh"><table id="ctrTbl"></table></div>
+        </div>
+      </div>
+      <h3 style="margin-top:14px">Persistence &amp; config inventory <span class="muted" style="font-weight:400;text-transform:none">- click a present file to view its contents</span></h3>
+      <div class="scroll" style="max-height:30vh"><table id="pTbl" class="pgrid"></table></div>
+    </div>
+
+    <!-- TABLE (proc/net/logon/time/ioc) -->
+    <div class="card hide" id="tblCard">
+      <div class="row" style="margin-bottom:8px">
+        <input class="txt" id="q" placeholder="search this view (command, address, path, IOC…)" style="width:300px">
+        <span id="dateWrap" class="hide"><span class="sep"></span>
+          <input class="txt mono" id="dfrom" placeholder="from YYYY-MM-DD" style="width:140px" title="Filter timeline by mtime/ctime/crtime (UTC)">
+          <span class="muted">&rarr;</span>
+          <input class="txt mono" id="dto" placeholder="to YYYY-MM-DD" style="width:140px" title="Filter timeline by mtime/ctime/crtime (UTC)"></span>
+        <span class="sep"></span>
+        <label style="font-size:12px" title="Show only rows scored suspicious (score ≥ 3)."><input type="checkbox" id="susOnly"> flagged only</label>
+        <span class="sep"></span>
+        <button class="btn" id="clearBtn">clear</button>
+        <button class="btn" id="exportBtn">Export view &rarr; CSV</button>
+        <button class="btn" id="copyBtn">Copy for case notes</button>
+        <span class="muted" id="count" style="margin-left:8px"></span>
+      </div>
+      <div class="scroll" id="tblScroll"><table id="tbl"></table></div>
+      <div class="muted" id="foot" style="font-size:11px;margin-top:6px">All times UTC. Row tint = score (red ≥ 5, amber 3–4); red left-border = IOC hit. Click a row for detail. Case window (/from /to) filters the timeline only and never changes scores. Max <span id="maxrowLbl"></span> rows shown; export writes the full filtered set.</div>
+    </div>
+
+    <div class="card hide" id="detailCard">
+      <h3>Detail <span class="lnk" id="detCopy" style="float:right;margin-left:12px">copy</span><span class="lnk" id="detClose" style="float:right">close &times;</span></h3>
+      <div id="detBody"></div>
+    </div>
+  </div>
+
+</div>
+
+<script language="JScript">
+"use strict";
+
+var APP_VERSION = "0.3.0";
+var TAR = "";                         // resolved tar.exe
+var TAR_VER = "";
+var QUERY = "";
+var MAXROWS = 5000;
+var LASTOUTDIR = "";
+var LASTROOT = "";                    // parse root (folder holding uac.log)
+var qTimer = null;
+var TAB = "overview";                 // overview | proc | net | logon | time | ioc
+var BUSY = false;
+var SUSONLY = false;
+var DFROM = 0, DTO = 0;
+var IOCS = [];
+var DETREC = null, DETKIND = "";
+
+/* datasets */
+var META = {};                        // run metadata from uac.log
+var PROC = [], NET = [], TIMEL = [], IOCHITS = [], PERSIST = [];
+var LOGON = [];                       // v0.2: auth/last/lastb login events
+var PKGS = [];                        // v0.2: package installs within case window
+var CONTAINERS = [];                  // v0.2: docker/podman running containers
+var PERSFIND = [];                    // v0.2: scored persistence deep-parse findings
+var TIMECAP = {shown:0, total:0};
+var HIDDENPIDS = {};                  // pid -> 1
+var PROCSCORE = {};                   // pid -> score (for network SUSPROC)
+var SORT = { proc:{k:0,d:-1}, net:{k:0,d:-1}, logon:{k:0,d:-1}, time:{k:1,d:-1}, ioc:{k:0,d:1} };
+
+/* ---------- tiny helpers (family) ---------- */
+function $(id){ return document.getElementById(id); }
+function esc(s){ if(s==null) return ""; s=String(s);
+  return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
+function nf(n){ n=String(n); var dot=n.indexOf("."); var dec=""; if(dot>=0){ dec=n.substring(dot); n=n.substring(0,dot); }
+  var r="",c=0; for(var k=n.length-1;k>=0;k--){ r=n.charAt(k)+r; c++; if(c%3===0&&k>0) r=","+r; } return r+dec; }
+function setStatus(msg,cls){ var el=$("status"); el.innerHTML=esc(msg); el.className=cls||"muted"; }
+function appendLog(t){ var el=$("log"); if(el.getAttribute("data-ph")==="1"){ el.innerHTML=""; el.setAttribute("data-ph","0"); }
+  el.style.display="block"; $("logToggle").innerHTML="Hide log"; el.innerHTML+=esc(t)+"\n"; el.scrollTop=el.scrollHeight; }
+function trimStr(s){ return String(s).replace(/^\s+|\s+$/g,""); }
+function baseName(p){ if(!p) return ""; p=String(p); var i=Math.max(p.lastIndexOf("\\"),p.lastIndexOf("/")); return i>=0?p.substring(i+1):p; }
+function showEl(id,vis){ var e=$(id); if(!e) return; var c=e.className.replace(/\s*\bhide\b/g,"");
+  e.className = vis ? c : (c+" hide"); }
+function trunc(s,n){ s=String(s); return s.length>n?(s.substring(0,n)+"…"):s; }
+function lc(s){ return String(s==null?"":s).toLowerCase(); }
+/* walk up from a clicked element looking for an attribute (stops at TABLE); returns its value or "" */
+function attrUp(el, attr){ var n=el; while(n && n.getAttribute){ var v=n.getAttribute(attr); if(v!=null && v!=="") return v;
+  if(String(n.tagName).toUpperCase()==="TABLE") break; n=n.parentNode; } return ""; }
+
+/* ---------- file IO via ActiveX (UTF-8 safe, network-zone fallback) - family verbatim ---------- */
+var FILE_IO="adodb";
+function zoneNote(){
+  appendLog("NOTE: running from a network location - Windows zone policy blocks the UTF-8 file reader (ADODB.Stream). Falling back to ANSI file IO. UAC output is UTF-8; accented paths may look odd but triage is unaffected. For full fidelity copy this folder to a LOCAL path and run from there.");
+}
+function readUtf8(path){
+  if(FILE_IO==="adodb"){
+    try{
+      var st=new ActiveXObject("ADODB.Stream");
+      st.Type=2; st.Charset="utf-8"; st.Open(); st.LoadFromFile(path);
+      var parts=[]; while(!st.EOS){ parts.push(st.ReadText(65536)); } st.Close();
+      return parts.join("");
+    }catch(e){
+      if(!/safety settings|data source/i.test(e.message||"")) throw e;
+      FILE_IO="fso"; zoneNote();
+    }
+  }
+  var fso=new ActiveXObject("Scripting.FileSystemObject");
+  var f=fso.OpenTextFile(path,1,false,0), out=f.ReadAll(); f.Close();
+  if(out.length>=3 && out.charCodeAt(0)===239 && out.charCodeAt(1)===187 && out.charCodeAt(2)===191) out=out.substring(3);
+  return out;
+}
+function writeUtf8(path,text){
+  if(FILE_IO==="adodb"){
+    try{
+      var st=new ActiveXObject("ADODB.Stream");
+      st.Type=2; st.Charset="utf-8"; st.Open(); st.WriteText(text); st.SaveToFile(path,2); st.Close();
+      return;
+    }catch(e){
+      if(!/safety settings|data source/i.test(e.message||"")) throw e;
+      FILE_IO="fso"; zoneNote();
+    }
+  }
+  var fso=new ActiveXObject("Scripting.FileSystemObject");
+  var f=fso.CreateTextFile(path,true,false); f.Write(text); f.Close();
+}
+/* read a text file into an array of lines (trailing \r stripped); [] if absent/unreadable.
+   UAC output is LF-only UTF-8 - split on \n and drop a stray trailing \r just in case. */
+function readLines(path){
+  try{ if(!fileExists(path)) return [];
+    var t=readUtf8(path); var a=t.split("\n");
+    for(var i=0;i<a.length;i++){ if(a[i].charAt(a[i].length-1)==="\r") a[i]=a[i].substring(0,a[i].length-1); }
+    if(a.length && a[a.length-1]==="") a.pop();
+    return a;
+  }catch(e){ return []; }
+}
+function uid(){ return new Date().getTime()+""+Math.floor(Math.random()*100000); }
+/* cmd expands %N / %VAR% inside .bat lines even within quotes */
+function batEsc(s){ return String(s).replace(/%/g,"%%"); }
+
+/* Run a batch script, wait, return {rc, log}. show=true → visible console. - family verbatim */
+function runBat(lines, show){
+  var fso=new ActiveXObject("Scripting.FileSystemObject");
+  var sh=new ActiveXObject("WScript.Shell");
+  var tmp=fso.GetSpecialFolder(2)+"";
+  var stamp=uid();
+  var bat=tmp+"\\uac_"+stamp+".bat";
+  var logp=tmp+"\\uac_"+stamp+".log";
+  var f=fso.CreateTextFile(bat,true);
+  f.WriteLine("@echo off");
+  for(var i=0;i<lines.length;i++){ f.WriteLine(lines[i].replace(/__LOG__/g,logp)); }
+  f.Close();
+  var rc=sh.Run('cmd /c ""'+bat+'""', show?1:0, true);
+  var txt="";
+  try{ if(fso.FileExists(logp)) txt=readUtf8(logp); }catch(e){ txt="(could not read log: "+e.message+")"; }
+  try{ fso.DeleteFile(bat); }catch(e2){}
+  try{ if(fso.FileExists(logp)) fso.DeleteFile(logp); }catch(e3){}
+  return { rc:rc, log:txt };
+}
+/* Run a batch NON-blocking; writes a .done marker when finished. Keeps the HTA responsive. */
+function runBatAsync(lines, show){
+  var fso=new ActiveXObject("Scripting.FileSystemObject");
+  var sh=new ActiveXObject("WScript.Shell");
+  var tmp=fso.GetSpecialFolder(2)+"";
+  var stamp=uid();
+  var bat=tmp+"\\uac_"+stamp+".bat";
+  var logp=tmp+"\\uac_"+stamp+".log";
+  var donep=tmp+"\\uac_"+stamp+".done";
+  var f=fso.CreateTextFile(bat,true);
+  f.WriteLine("@echo off");
+  for(var i=0;i<lines.length;i++){ f.WriteLine(lines[i].replace(/__LOG__/g,logp)); }
+  f.WriteLine('echo done> "'+donep+'"');
+  f.Close();
+  sh.Run('cmd /c ""'+bat+'""', show?1:0, false);
+  return { bat:bat, log:logp, done:donep, elapsed:0 };
+}
+function pollDone(ctx){
+  var fso=new ActiveXObject("Scripting.FileSystemObject");
+  if(fso.FileExists(ctx.done)){
+    var log=""; try{ if(fso.FileExists(ctx.log)) log=readUtf8(ctx.log); }catch(e){ log="(could not read log: "+e.message+")"; }
+    try{ fso.DeleteFile(ctx.bat); }catch(e1){}
+    try{ fso.DeleteFile(ctx.done); }catch(e2){}
+    try{ if(fso.FileExists(ctx.log)) fso.DeleteFile(ctx.log); }catch(e3){}
+    ctx.onDone(log);
+    return;
+  }
+  ctx.elapsed+=1;
+  if(ctx.elapsed>1800){ ctx.onTimeout&&ctx.onTimeout(); return; }   // 30-min cap (big tarballs)
+  if(ctx.onTick) ctx.onTick(ctx.elapsed);
+  window.setTimeout(function(){ pollDone(ctx); }, 1000);
+}
+
+/* ---------- fs helpers (family) ---------- */
+function fileExists(p){ try{ return new ActiveXObject("Scripting.FileSystemObject").FileExists(p); }catch(e){ return false; } }
+function fileSize(p){ try{ return new ActiveXObject("Scripting.FileSystemObject").GetFile(p).Size; }catch(e){ return -1; } }
+function folderExists(p){ try{ return new ActiveXObject("Scripting.FileSystemObject").FolderExists(p); }catch(e){ return false; } }
+function parentDir(p){ var i=String(p).lastIndexOf("\\"); return i>=0?p.substring(0,i):p; }
+/* create a directory and any missing parents (FSO CreateFolder does not) */
+function ensureDir(p){ try{ var fso=new ActiveXObject("Scripting.FileSystemObject");
+  if(!p || fso.FolderExists(p)) return fso.FolderExists(p);
+  var parent=parentDir(p); if(parent && parent!==p && !fso.FolderExists(parent)) ensureDir(parent);
+  fso.CreateFolder(p); return true; }catch(e){ return false; } }
+function htaFolder(){
+  try{ var cl=uacHta.commandLine+""; var m=cl.match(/"([^"]+\.hta)"/i); if(!m) m=cl.match(/([A-Za-z]:\\[^"]+\.hta)/i);
+    if(m) return parentDir(m[1]); }catch(e){}
+  try{ var p=decodeURIComponent(location.pathname+"").replace(/^\//,"").replace(/\//g,"\\"); return parentDir(p); }catch(e2){}
+  return "";
+}
+function isNetworkPath(p){
+  try{ if(/^\\\\/.test(p)) return true;
+    var fso=new ActiveXObject("Scripting.FileSystemObject");
+    return fso.GetDrive(fso.GetDriveName(p)).DriveType===3;
+  }catch(e){ return false; }
+}
+
+/* ---------- tar.exe (extraction engine) ---------- */
+function resolveTar(){
+  var cands=["C:\\Windows\\System32\\tar.exe","C:\\Windows\\Sysnative\\tar.exe","tar.exe"];
+  for(var i=0;i<cands.length;i++){ if(cands[i].indexOf("\\")<0 || fileExists(cands[i])){ TAR=cands[i]; return true; } }
+  TAR=""; return false;
+}
+function checkTar(){
+  if(!TAR){ $("verpill").innerHTML="tar.exe: <span style='color:#f85149'>not found</span>"; return; }
+  try{
+    var r=runBat(['"'+batEsc(TAR)+'" --version > "__LOG__" 2>&1']);
+    var m=r.log.match(/bsdtar\s+([0-9.]+)/i);
+    TAR_VER=m?m[1]:"";
+    $("verpill").innerHTML = TAR_VER ? ("bsdtar v"+esc(TAR_VER)) : "tar.exe present";
+    $("exeline").innerHTML="Extractor: "+esc(TAR)+(TAR_VER?(" (bsdtar "+esc(TAR_VER)+")"):"");
+  }catch(e){ $("verpill").innerHTML="tar.exe: error"; }
+}
+
+/* ---------- target hostname + _Processed convention (family) ---------- */
+var APP_NAME="UAC";
+var HOST_TOUCHED=false, OUT_TOUCHED=false;
+function sanitHost(s){ return String(s).replace(/[^A-Za-z0-9._\-]/g,"-").replace(/^[\-.]+|[\-.]+$/g,""); }
+/* UAC archives are named uac-<hostname>-<os>-<timestamp>. Peel the leading uac- and the trailing
+   -<os>-<digits> to recover the (possibly hyphenated) hostname. */
+function guessHost(p){
+  p=String(p||"");
+  var b=baseName(p).replace(/\.(tar\.gz|tgz|tar|zip)$/i,"");
+  var mu=b.match(/^uac-(.+)-(?:linux|macos|osx|aix|freebsd|netbsd|openbsd|solaris|netscaler|esxi|android)-\d{6,}$/i);
+  if(mu) return mu[1];
+  var m=p.match(/Collection-([A-Za-z0-9][A-Za-z0-9\-_\.]*?)-\d{4}-\d{2}-\d{2}/i); if(m) return m[1];
+  m=p.match(/[\\\/]_Processed[\\\/]([^\\\/]+)[\\\/]/i); if(m) return m[1];
+  return "";
+}
+function defaultOutDir(){
+  var h=sanitHost($("hostName").value); if(!h) return "";
+  var base=htaFolder(); if(!base){ try{ base=new ActiveXObject("Scripting.FileSystemObject").GetSpecialFolder(2)+""; }catch(e){ return ""; } }
+  return base+"\\_Processed\\"+h+"\\"+APP_NAME;
+}
+function syncOutDir(){ if(OUT_TOUCHED) return; var d=defaultOutDir(); if(d) $("outDir").value=d; }
+/* extracted-folder input carries no host in its name - recover it from uac.log's Hostname line */
+function hostFromUacLog(p){
+  try{ var fso=new ActiveXObject("Scripting.FileSystemObject");
+    if(!fso.FolderExists(p)) return "";
+    var root=findUacRoot(p); if(!root) return "";
+    var lines=readLines(root+"\\uac.log");
+    for(var i=0;i<lines.length && i<60;i++){ var m=lines[i].match(/\bHostname:\s*([^\s]+)/); if(m) return m[1]; }
+  }catch(e){} return "";
+}
+function hostGuessFrom(p){
+  if(!HOST_TOUCHED || !trimStr($("hostName").value)){ var g=guessHost(p); if(!g) g=hostFromUacLog(p); if(g) $("hostName").value=sanitHost(g); }
+  syncOutDir();
+}
+function requireHost(){
+  var h=sanitHost($("hostName").value);
+  if(!h){ setStatus("Target hostname is required - it names the output folder _Processed\\<host>\\"+APP_NAME+". Type the host this capture came from, then Analyze again.","err");
+    try{ $("hostName").focus(); }catch(e){} return ""; }
+  if(!trimStr($("outDir").value)) syncOutDir();
+  return h;
+}
+
+/* ---------- shared toolkit IOC list (family) ---------- */
+function loadToolkitIoc(){
+  try{
+    var base=htaFolder(); if(!base) return;
+    var p=base+"\\IOC.txt";
+    if(!fileExists(p)) return;
+    var parts=String(readUtf8(p)).split(/\r?\n/), add=[], i;
+    for(i=0;i<parts.length;i++){ var s=trimStr(parts[i]); if(s && s.charAt(0)!=="#") add.push(s); }
+    if(!add.length) return;
+    var cur=$("iocBox").value, curL={}, cp=String(cur).split(/[\r\n,;]+/);
+    for(i=0;i<cp.length;i++){ var c=trimStr(cp[i]).toLowerCase(); if(c) curL[c]=1; }
+    var fresh2=[]; for(i=0;i<add.length;i++){ if(!curL[add[i].toLowerCase()]) fresh2.push(add[i]); }
+    if(!fresh2.length) return;
+    $("iocBox").value=(trimStr(cur)?(cur.replace(/\s+$/,"")+"\r\n"):"")+fresh2.join("\r\n");
+    IOCS=parseTerms($("iocBox").value);
+    appendLog("Toolkit IOC list: merged "+fresh2.length+" term(s) from "+p);
+  }catch(e){}
+}
+function parseTerms(t){ var parts=String(t).split(/[\r\n,;]+/), out=[]; for(var i=0;i<parts.length;i++){ var s=trimStr(parts[i]).toLowerCase(); if(s) out.push(s); } return out; }
+
+/* ---------- run provenance (family) ---------- */
+function writeRunInfo(outdir, input, freshFiles){
+  try{
+    var p=String(outdir).replace(/[\\\/]+$/,"")+"\\runinfo.json";
+    var arr=[];
+    try{ if(fileExists(p)){ var old=JSON.parse(readUtf8(p)); if(old && old.length!=null) arr=old; } }catch(e0){}
+    var d=new Date(); function p2(x){ return (x<10?"0":"")+x; }
+    var iso=d.getFullYear()+"-"+p2(d.getMonth()+1)+"-"+p2(d.getDate())+"T"+p2(d.getHours())+":"+p2(d.getMinutes())+":"+p2(d.getSeconds());
+    var names=[]; for(var i=0;i<freshFiles.length && i<50;i++) names.push(freshFiles[i].name||String(freshFiles[i]));
+    var ent={app:APP_NAME, appVersion:APP_VERSION, host:sanitHost($("hostName").value),
+              input:String(input||""), finishedUtc:iso, files:names};
+    if(CASE_FROM) ent.winFrom=CASE_FROM; if(CASE_TO) ent.winTo=CASE_TO;
+    arr.push(ent);
+    writeUtf8(p, JSON.stringify(arr,null,2));
+    RUNINFO_LAST={path:p, iso:iso};
+  }catch(e){}
+}
+var RUNINFO_LAST=null;
+function patchRunInfoSummary(summary){
+  try{
+    if(!RUNINFO_LAST || !summary) return;
+    var arr=JSON.parse(readUtf8(RUNINFO_LAST.path));
+    if(!arr || arr.length==null) return;
+    for(var i=arr.length-1;i>=0;i--){ var e=arr[i];
+      if(e && e.app===APP_NAME && e.finishedUtc===RUNINFO_LAST.iso){ e.summary=summary; break; } }
+    writeUtf8(RUNINFO_LAST.path, JSON.stringify(arr,null,2));
+  }catch(e){}
+}
+function buildRunSummary(){
+  try{
+    var entries=PROC.length+NET.length+LOGON.length+TIMEL.length+PERSFIND.length+IOCHITS.length;
+    var flagged=0, maxScore=0, topRow=null, topKind="";
+    function scan(arr,kind){ for(var i=0;i<arr.length;i++){ var r=arr[i];
+      if(r.score>=3) flagged++;
+      if(r.score>maxScore){ maxScore=r.score; topRow=r; topKind=kind; } } }
+    scan(PROC,"process"); scan(NET,"network"); scan(LOGON,"logon"); scan(TIMEL,"timeline"); scan(PERSFIND,"persistence");
+    flagged+=IOCHITS.length;   // every IOC-sweep hit is a flagged item
+    var top="";
+    if(topRow){
+      var lab = topKind==="process" ? topRow.cmd
+              : topKind==="network" ? (topRow.proto+" "+topRow.local+" -> "+topRow.peer)
+              : topKind==="logon" ? (topRow.result+" "+topRow.user+" from "+topRow.ip)
+              : topKind==="persistence" ? (topRow.src+": "+topRow.cmd)
+              : topRow.path;
+      top=topKind+": "+trunc(lab,80)+" ("+maxScore+")";
+    } else if(IOCHITS.length){ top="ioc: "+trunc(IOCHITS[0].file+":"+IOCHITS[0].line,80); }
+    return {entries:entries, flagged:flagged, maxScore:maxScore, top:top,
+            processes:PROC.length, connections:NET.length, logons:LOGON.length, timeline:TIMEL.length,
+            persistence:PERSFIND.length, packages:PKGS.length, containers:CONTAINERS.length, iocHits:IOCHITS.length};
+  }catch(e){ return null; }
+}
+
+/* ---------- extraction / locate ---------- */
+function nowStamp(){ var d=new Date(); function p(x){return (x<10?"0":"")+x;}
+  return d.getFullYear()+""+p(d.getMonth()+1)+p(d.getDate())+"_"+p(d.getHours())+p(d.getMinutes())+p(d.getSeconds()); }
+function isArchive(p){ return /\.(tar\.gz|tgz|tar|zip)$/i.test(String(p)); }
+/* find the folder that holds uac.log: the dir itself or any immediate subfolder */
+function findUacRoot(dir){
+  try{
+    var fso=new ActiveXObject("Scripting.FileSystemObject");
+    if(!fso.FolderExists(dir)) return "";
+    if(fso.FileExists(dir+"\\uac.log")) return dir;
+    var e=new Enumerator(fso.GetFolder(dir).SubFolders);
+    for(; !e.atEnd(); e.moveNext()){ var sf=e.item(); if(fso.FileExists(sf.Path+"\\uac.log")) return sf.Path+""; }
+  }catch(er){}
+  return "";
+}
+function analyze(){
+  if(BUSY){ setStatus("A run is already in progress - wait for it to finish.","err"); return; }
+  var inp=trimStr($("inPath").value);
+  if(!inp){ setStatus("Point at a uac-*.tar.gz / .zip archive or an already-extracted folder.","err"); return; }
+  var fso=new ActiveXObject("Scripting.FileSystemObject");
+  // extracted-folder input carries no host in its name - recover it from uac.log before requiring it
+  if(fso.FolderExists(inp) && !trimStr($("hostName").value)){
+    var hg=hostFromUacLog(inp); if(hg){ $("hostName").value=sanitHost(hg); syncOutDir(); appendLog("Host recovered from uac.log: "+hg); }
+  }
+  if(!requireHost()) return;
+  var outdir=trimStr($("outDir").value); if(!outdir){ syncOutDir(); outdir=trimStr($("outDir").value); }
+  LASTOUTDIR=outdir;
+  ensureDir(outdir);   // runinfo/ioc_hits land here; the folder path has no extraction mkdir to create it
+  // already-extracted folder?
+  if(fso.FolderExists(inp)){
+    var root0=findUacRoot(inp);
+    if(!root0){ setStatus("That folder does not contain uac.log (not an extracted UAC capture). Point at the folder holding uac.log, or at the archive.","err"); return; }
+    setStatus("Parsing extracted capture…","muted");
+    window.setTimeout(function(){ parseCapture(root0, inp); }, 40);
+    return;
+  }
+  if(!fso.FileExists(inp)){ setStatus("Not found: "+inp,"err"); return; }
+  if(!isArchive(inp)){ setStatus("Unrecognized input - expected a .tar.gz / .tar / .zip archive or an extracted folder.","err"); return; }
+  if(!TAR){ setStatus("tar.exe not found (needs Windows 10 1803+). Extract the archive manually with 7-Zip and point this app at the folder.","err"); return; }
+  // size guard
+  var sz=fileSize(inp);
+  if(sz>2147483648){ if(!confirm("This archive is "+fmtSize(sz)+". Extraction will use that much disk and can take a while.\n\nProceed?")) { setStatus("Cancelled.","muted"); return; } }
+  var runDir=outdir+"\\"+nowStamp();
+  var exDir=runDir+"\\extracted";
+  appendLog("Extracting "+inp+"\n  -> "+exDir+"\n(bsdtar exits 1 on UAC tarballs because of Unix symlinks - that's expected; success is judged by uac.log appearing.)");
+  BUSY=true; $("procBtn").disabled=true;
+  setStatus("Extracting… a console window shows progress.","muted");
+  var lines=[
+    'if not exist "'+batEsc(runDir)+'" mkdir "'+batEsc(runDir)+'"',
+    'if not exist "'+batEsc(exDir)+'" mkdir "'+batEsc(exDir)+'"',
+    "echo Extracting UAC archive with bsdtar...",
+    'echo   '+batEsc(baseName(inp)),
+    '"'+batEsc(TAR)+'" -xf "'+batEsc(inp)+'" -C "'+batEsc(exDir)+'" >> "__LOG__" 2>&1',
+    'echo TAR_EXIT:%errorlevel% >> "__LOG__"',
+    "echo Done extracting."
+  ];
+  var ctx=runBatAsync(lines, true);
+  ctx.onTick=function(s){ setStatus("Extracting… "+s+"s","muted"); };
+  ctx.onTimeout=function(){ BUSY=false; $("procBtn").disabled=false; setStatus("Extraction still running after 30 min - stopped watching. Check the output folder.","err"); };
+  ctx.onDone=function(log){ BUSY=false; $("procBtn").disabled=false; extractDone(log, exDir, inp); };
+  window.setTimeout(function(){ pollDone(ctx); }, 1000);
+}
+function extractDone(log, exDir, input){
+  appendLog("--- tar extraction ---\n"+trunc(log,4000));
+  var root=findUacRoot(exDir);
+  if(!root){
+    if(/passphrase|password|encrypted|incorrect|unable to open|cannot open/i.test(log))
+      setStatus("Extraction failed - the archive looks password-protected (UAC -P). bsdtar can't open encrypted zips. Extract it with 7-Zip, then point this app at the folder.","err");
+    else
+      setStatus("Extraction produced no uac.log - the archive may be corrupt or not a UAC capture. See the log.","err");
+    return;
+  }
+  var skip=(log.match(/Invalid argument/g)||[]).length;
+  if(skip) appendLog("bsdtar skipped "+skip+" Unix symlink entry(ies) Windows can't create - expected, regular files are intact.");
+  setStatus("Extracted OK"+(skip?(" ("+skip+" symlinks skipped)"):"")+" - parsing…","ok");
+  window.setTimeout(function(){ parseCapture(root, input); }, 40);
+}
+
+/* ---------- parse capture ---------- */
+function jp(root, rel){ return root+"\\"+String(rel).replace(/\//g,"\\"); }
+function parseCapture(root, input){
+  try{
+    LASTROOT=root;
+    setStatus("Parsing capture…","muted");
+    parseMeta(root);
+    parseProcesses(root);
+    parseNetwork(root);
+    parseLogons(root);
+    parseBodyfile(root);
+    parsePackages(root);
+    parseContainers(root);
+    deepParsePersistence(root);
+    buildPersistence(root);
+    buildInventory(root);
+    if(IOCS.length){ setStatus("Sweeping tree for IOCs…","muted"); sweepIocs(root); sweepHashExecutables(root); } else { IOCHITS=[]; }
+    rescoreAll();
+    // provenance + summary
+    var produced=[];
+    if(IOCS.length){ produced.push({name:"ioc_hits.csv"}); }
+    writeRunInfo(LASTOUTDIR, input, produced);   // empty list is honest - views are in-app, not files
+    patchRunInfoSummary(buildRunSummary());
+    $("results").className="";
+    $("srcpill").innerHTML=esc(META.host||baseName(root))+" &middot; "+esc(META.os||"unix")
+      +" &middot; "+nf(PROC.length)+"p / "+nf(NET.length)+"c / "+nf(TIMEL.length)+"t";
+    setTab("overview", true);
+    render();
+    var fl=buildRunSummary();
+    setStatus("Parsed "+esc(META.host||baseName(root))+" - "+nf(PROC.length)+" processes, "+nf(NET.length)+" connections, "+nf(LOGON.length)+" logons, "+nf(TIMEL.length)+" timeline rows"
+      +(fl&&fl.flagged?(", "+nf(fl.flagged)+" flagged"):"")+".","ok");
+  }catch(e){ setStatus("Parse error: "+e.message,"err"); appendLog("Parse error: "+e.message); }
+}
+
+/* metadata from uac.log header block + host boot time / uptime */
+function parseMeta(root){
+  META={host:"",os:"",arch:"",tz:"",runAs:"",started:"",uacVer:"",cmdLine:"",elapsed:"",failed:0,cmdTotal:0,
+        hostDate:"",bootTime:"",uptime:"",loadAvg:""};
+  // host boot time (uptime -s: "2026-07-07 19:11:44") and uptime/load (uptime: " ... up 2 min, 0 users, load average: ...")
+  var bs=readLines(jp(root,"live_response/system/uptime_-s.txt"));
+  for(var b=0;b<bs.length;b++){ var bm=trimStr(bs[b]).match(/^\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}$/); if(bm){ META.bootTime=trimStr(bs[b]); break; } }
+  var us=readLines(jp(root,"live_response/system/uptime.txt"));
+  for(var u=0;u<us.length;u++){ var um=us[u].match(/up\s+(.+?),\s*\d+\s+users?/i); if(um){ META.uptime=trimStr(um[1]); }
+    var lm=us[u].match(/load average:\s*(.+)$/i); if(lm){ META.loadAvg=trimStr(lm[1]); } }
+  // host clock at collection time (date output) - useful to sanity-check TZ / clock skew
+  var ds=readLines(jp(root,"live_response/system/date.txt"));
+  for(var d2=0;d2<ds.length;d2++){ if(trimStr(ds[d2])){ META.hostDate=trimStr(ds[d2]); break; } }
+  var lines=readLines(jp(root,"uac.log"));
+  for(var i=0;i<lines.length;i++){
+    var ln=lines[i];
+    var m=ln.match(/^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) [+\-]\d{4}\s+(\w+)\s+(.*)$/);
+    if(!m) continue;
+    var when=m[1], lvl=m[2], msg=m[3];
+    if(lvl==="INF"){
+      if(!META.started) META.started=when;
+      var kv=msg.match(/^([A-Za-z][A-Za-z /]+?):\s*(.*)$/);
+      if(kv){
+        var key=trimStr(kv[1]).toLowerCase(), val=trimStr(kv[2]);
+        if(key.indexOf("unix-like artifacts collector")===0){ } // banner handled below
+        else if(key==="hostname") META.host=val;
+        else if(key==="operating system") META.os=val;
+        else if(key==="system architecture") META.arch=val;
+        else if(key==="time zone") META.tz=val;
+        else if(key==="running as") META.runAs=val;
+        else if(key==="command line") META.cmdLine=val;
+      }
+      var vb=msg.match(/Unix-like Artifacts Collector\s+([0-9.]+)/i); if(vb) META.uacVer=vb[1];
+      var el=msg.match(/collection completed in\s+(\d+)\s+seconds/i); if(el) META.elapsed=el[1];
+    }
+    if(lvl==="CMD"){ META.cmdTotal++;
+      if(/\b2>\s*.*(Terminated|timeout|timed out)/i.test(ln)) META.failed++;
+    }
+  }
+  if(!META.host){ // fall back to archive/folder name
+    var g=guessHost(root); if(g) META.host=g;
+  }
+}
+
+/* processes - ps -ef primary, enriched by lstart / exe-path / sha1 / hidden-pids */
+function parseProcesses(root){
+  PROC=[]; HIDDENPIDS={};
+  var exeByPid={}, startByPid={}, sha1ByPid={}, delByPid={}, i, m;
+  // exe paths: "lrwx... /proc/<pid>/exe -> <target>" - a "(deleted)" suffix means the running
+  // binary was unlinked from disk (classic Linux malware anti-forensics): keep it as a signal
+  var el=readLines(jp(root,"live_response/process/running_processes_full_paths.txt"));
+  for(i=0;i<el.length;i++){ m=el[i].match(/\/proc\/(\d+)\/exe\s*->\s*(.+)$/); if(m){
+    var tg=trimStr(m[2]);
+    if(/\(deleted\)\s*$/.test(tg)){ delByPid[m[1]]=1; tg=trimStr(tg.replace(/\s*\(deleted\)\s*$/,"")); }
+    exeByPid[m[1]]=tg; } }
+  // sha1: "<sha1>  /proc/<pid>/exe"
+  var sl=readLines(jp(root,"live_response/process/hash_running_processes.sha1"));
+  for(i=0;i<sl.length;i++){ m=sl[i].match(/^([0-9a-fA-F]{40})\s+\/proc\/(\d+)\/exe/); if(m) sha1ByPid[m[2]]=m[1].toLowerCase(); }
+  // full start times from lstart: "  PID USER  Ddd Mmm D HH:MM:SS YYYY  cmd"
+  var ll=readLines(jp(root,"live_response/process/ps_-axo_pid_user_lstart_args.txt"));
+  for(i=1;i<ll.length;i++){ m=ll[i].match(/^\s*(\d+)\s+\S+\s+(\w{3}\s+\w{3}\s+\d+\s+\d{2}:\d{2}:\d{2}\s+\d{4})\s/); if(m) startByPid[m[1]]=trimStr(m[2]); }
+  // hidden pids
+  var hl=readLines(jp(root,"live_response/process/hidden_pids_for_ps_command.txt"));
+  for(i=0;i<hl.length;i++){ var hp=trimStr(hl[i]); if(/^\d+$/.test(hp)) HIDDENPIDS[hp]=1; }
+  // primary: ps -ef
+  var pl=readLines(jp(root,"live_response/process/ps_-ef.txt")), usedEf=false;
+  for(i=0;i<pl.length;i++){
+    var ln=pl[i]; if(/^UID\s+PID\s+PPID/.test(ln)) continue;
+    m=ln.match(/^(\S+)\s+(\d+)\s+(\d+)\s+\S+\s+(\S+)\s+\S+\s+\S+\s+(.*)$/);
+    if(!m) continue;
+    usedEf=true;
+    pushProc(m[1], m[2], m[3], startByPid[m[2]]||m[4], m[5], exeByPid[m[2]], sha1ByPid[m[2]], delByPid[m[2]]);
+  }
+  if(!usedEf){ // fallback: lstart file (no ppid)
+    for(i=1;i<ll.length;i++){ var mm=ll[i].match(/^\s*(\d+)\s+(\S+)\s+(\w{3}\s+\w{3}\s+\d+\s+\d{2}:\d{2}:\d{2}\s+\d{4})\s+(.*)$/);
+      if(mm) pushProc(mm[2], mm[1], "", trimStr(mm[3]), mm[4], exeByPid[mm[1]], sha1ByPid[mm[1]], delByPid[mm[1]]); }
+  }
+  // A pid in hidden_pids is BY DEFINITION absent from ps output (that's what the artifact
+  // detects - rootkit-hidden processes). The /proc-derived maps (exe, sha1, start) DO see such
+  // pids, so synthesize a row for any hidden pid ps didn't report; otherwise the exact case
+  // this artifact exists for would be invisible in the Processes view.
+  var seenPids={}; for(i=0;i<PROC.length;i++) seenPids[PROC[i].pid]=1;
+  for(var hpid in HIDDENPIDS){ if(HIDDENPIDS.hasOwnProperty(hpid) && !seenPids[hpid]){
+    var hexe=exeByPid[hpid]||"";
+    pushProc("(hidden)", hpid, "", startByPid[hpid]||"", hexe||"(not in ps - see /proc maps)", hexe, sha1ByPid[hpid], delByPid[hpid]);
+  } }
+}
+function pushProc(user, pid, ppid, start, cmd, exe, sha1, deleted){
+  cmd=trimStr(cmd||""); exe=exe||"";
+  var r={ kind:"process", user:trimStr(user), pid:String(pid), ppid:String(ppid||""), start:start||"",
+          cmd:cmd, exe:exe, sha1:sha1||"", hidden:!!HIDDENPIDS[String(pid)], deleted:!!deleted,
+          score:0, tags:[], reasons:[] };
+  r.blob=lc(user+" "+cmd+" "+exe+" "+(sha1||""));
+  PROC.push(r);
+}
+
+/* network - ss -tanp (tcp) + ss -uanp (udp); fallback netstat -anp */
+function splitAddrPort(s){
+  s=String(s||""); var addr=s, port="";
+  var lc2=s.lastIndexOf(":");
+  if(lc2>=0){ addr=s.substring(0,lc2); port=s.substring(lc2+1); }
+  addr=addr.replace(/^\[|\]$/g,"");
+  return {addr:addr, port:port};
+}
+function procFromSs(field){ // users:(("name",pid=1234,fd=3))
+  var r={pid:"",name:""}; if(!field) return r;
+  var mp=field.match(/pid=(\d+)/); if(mp) r.pid=mp[1];
+  var mn=field.match(/\(\("([^"]+)"/); if(mn) r.name=mn[1];
+  return r;
+}
+function parseNetwork(root){
+  NET=[]; var seen={};
+  function addRow(proto, state, local, peer, procpid, procname, rawproc){
+    var key=proto+"|"+state+"|"+local+"|"+peer+"|"+(procpid||"")+"|"+(procname||"");
+    if(seen[key]) return; seen[key]=1;
+    var lp=splitAddrPort(local), pp=splitAddrPort(peer);
+    var r={ kind:"network", proto:proto, state:state, local:local, peer:peer,
+            localAddr:lp.addr, localPort:lp.port, peerAddr:pp.addr, peerPort:pp.port,
+            procPid:procpid||"", procName:procname||"", procRaw:rawproc||"",
+            score:0, tags:[], reasons:[] };
+    r.blob=lc(proto+" "+state+" "+local+" "+peer+" "+(procname||"")+" "+(rawproc||""));
+    NET.push(r);
+  }
+  function parseSs(rel, proto){
+    var ln=readLines(jp(root,rel)); if(!ln.length) return false;
+    for(var i=0;i<ln.length;i++){ var s=ln[i]; if(/^State\b/.test(s)||trimStr(s)==="") continue;
+      var t=trimStr(s).split(/\s+/); if(t.length<5) continue;
+      var proc=t.length>=6?t.slice(5).join(" "):"";
+      var pf=procFromSs(proc);
+      addRow(proto, t[0], t[3], t[4], pf.pid, pf.name, proc);
+    }
+    return true;
+  }
+  var gotTcp=parseSs("live_response/network/ss_-tanp.txt","tcp");
+  var gotUdp=parseSs("live_response/network/ss_-uanp.txt","udp");
+  if(!gotTcp && !gotUdp){
+    // fallback: netstat -anp (Internet section only)
+    var nl=readLines(jp(root,"live_response/network/netstat_-anp.txt")), inSec=false;
+    for(var i=0;i<nl.length;i++){ var s=nl[i];
+      if(/^Active Internet connections/i.test(s)){ inSec=true; continue; }
+      if(/^Active UNIX domain sockets/i.test(s)){ inSec=false; continue; }
+      if(!inSec) continue;
+      if(/^Proto\b/.test(s)||trimStr(s)==="") continue;
+      var t=trimStr(s).split(/\s+/); if(t.length<5) continue;
+      var proto=t[0].replace(/[0-9]+$/,""); // tcp6->tcp, udp6->udp
+      var state="", pf2="";
+      if(/^tcp/.test(t[0])){ state=t[5]||""; pf2=t[6]||""; }
+      else { state=""; pf2=t[5]||""; }
+      var pid="", name="";
+      var mm=String(pf2).match(/^(\d+)\/(.+)$/); if(mm){ pid=mm[1]; name=mm[2]; }
+      addRow(proto, state, t[3], t[4], pid, name, pf2);
+    }
+  }
+}
+
+/* timeline - TSK bodyfile, window-prefiltered + capped */
+function bodyDay(sec){ if(!sec) return 0; var d=new Date(sec*1000);
+  return Number(d.getUTCFullYear()+""+p2n(d.getUTCMonth()+1)+p2n(d.getUTCDate())); }
+function p2n(x){ x=String(x); return x.length<2?("0"+x):x; }
+/* Bodyfile is MFT-scale (a MINIMAL box already has ~159k rows). Building+scoring a JScript object
+   per row is the wrapper's one heavy loop, so we (a) cap the stored/scored set and (b) once the
+   cap is full and no case window is filtering, only TALLY the remaining lines - skipping the
+   split + object build entirely. Set a /from /to window (or the Timeline date filter) to focus a
+   big capture; past-cap rows are reported as "capped N of M". The MFTECmd-hybrid (PS1 ->
+   virtualized-grid HTML) remains the noted fallback if this ever proves insufficient. */
+var TIMELINE_CAP=50000;
+function parseBodyfile(root){
+  TIMEL=[]; TIMECAP={shown:0,total:0};
+  var lines=readLines(jp(root,"bodyfile/bodyfile.txt"));
+  var cap=TIMELINE_CAP, total=0, win=(DFROM||DTO);
+  for(var i=0;i<lines.length;i++){
+    var ln=lines[i]; if(ln.indexOf("|")<0) continue;
+    // fast tally past the cap when nothing is filtering - avoid the split/object cost on 100k+ rows
+    if(!win && TIMEL.length>=cap){ total++; continue; }
+    var parts=ln.split("|"); if(parts.length<11) continue;
+    // TSK: md5|name|inode|mode|uid|gid|size|atime|mtime|ctime|crtime - name may contain '|'
+    var n=parts.length;
+    var crtime=parts[n-1], ctime=parts[n-2], mtime=parts[n-3], atime=parts[n-4],
+        size=parts[n-5], gid=parts[n-6], uid2=parts[n-7], mode=parts[n-8], inode=parts[n-9];
+    var name=parts.slice(1, n-9).join("|");
+    total++;
+    var mt=parseInt(mtime,10)||0, ct=parseInt(ctime,10)||0, cr=parseInt(crtime,10)||0;
+    // case-window prefilter (mtime OR ctime OR crtime day inside window) - FILTER, never scored
+    if(win){
+      var dm=bodyDay(mt), dc=bodyDay(ct), dcr=bodyDay(cr);
+      if(!(inDay(dm)||inDay(dc)||inDay(dcr))) continue;
+    }
+    if(TIMEL.length>=cap) continue;   // window case: keep counting total, stop storing
+    var r={ kind:"timeline", path:name, mode:mode, uid:uid2, size:parseInt(size,10)||0,
+            atime:parseInt(atime,10)||0, mtime:mt, ctime:ct, crtime:cr,
+            score:0, tags:[], reasons:[] };
+    r.blob=lc(name);
+    TIMEL.push(r);
+  }
+  TIMECAP.total=total; TIMECAP.shown=TIMEL.length;
+}
+function inDay(d){ if(!d) return false; if(DFROM && d<DFROM) return false; if(DTO && d>DTO) return false; return true; }
+
+/* persistence & config inventory - presence checks over the [root] mirror.
+   GROUND-TRUTH: UAC's files/* artifacts (ssh keys, shell histories) are NOT collected into a
+   top-level files/ dir - they mirror under [root] at their real per-user paths. So SSH keys and
+   histories are "userfile" entries: searched under [root]/root and each [root]/home/<user>. */
+var PERSIST_LIST=[
+  {label:"Root crontab", rel:"[root]/etc/crontab", kind:"file"},
+  {label:"System cron.d", rel:"[root]/etc/cron.d", kind:"dir"},
+  {label:"User crontabs", rel:"[root]/var/spool/cron", kind:"dir"},
+  {label:"systemd system units", rel:"[root]/etc/systemd/system", kind:"dir"},
+  {label:"rc.local", rel:"[root]/etc/rc.local", kind:"file"},
+  {label:"ld.so.preload", rel:"[root]/etc/ld.so.preload", kind:"file"},
+  {label:"/etc/passwd", rel:"[root]/etc/passwd", kind:"file"},
+  {label:"/etc/shadow", rel:"[root]/etc/shadow", kind:"file"},
+  {label:"sshd_config", rel:"[root]/etc/ssh/sshd_config", kind:"file"},
+  {label:"/etc/hosts", rel:"[root]/etc/hosts", kind:"file"},
+  {label:"SSH authorized_keys (per-user)", user:".ssh/authorized_keys", kind:"userfile"},
+  {label:"Shell histories (per-user)", user:[".bash_history",".zsh_history",".sh_history",".ash_history"], kind:"userfile"}
+];
+/* user home dirs in the [root] mirror: [root]/root plus each [root]/home/<user> */
+function userHomes(root){
+  var fso=new ActiveXObject("Scripting.FileSystemObject"), homes=[];
+  var rh=jp(root,"[root]/root"); if(fso.FolderExists(rh)) homes.push(rh);
+  var hd=jp(root,"[root]/home");
+  if(fso.FolderExists(hd)){ try{ var e=new Enumerator(fso.GetFolder(hd).SubFolders); for(;!e.atEnd();e.moveNext()) homes.push(e.item().Path+""); }catch(er){} }
+  return homes;
+}
+function findUserFiles(root, rels){
+  if(typeof rels==="string") rels=[rels];
+  var fso=new ActiveXObject("Scripting.FileSystemObject"), homes=userHomes(root), hits=[];
+  for(var i=0;i<homes.length;i++){ for(var j=0;j<rels.length;j++){
+    var f=homes[i]+"\\"+String(rels[j]).replace(/\//g,"\\"); if(fso.FileExists(f)) hits.push(f); } }
+  return hits;
+}
+function buildPersistence(root){
+  PERSIST=[];
+  var fso=new ActiveXObject("Scripting.FileSystemObject");
+  for(var i=0;i<PERSIST_LIST.length;i++){
+    var it=PERSIST_LIST[i], present=false, size=0, count=0, ioc=false, viewPath="", relLabel=it.rel||("[root]/*/"+(it.user.length?it.user[0]:it.user));
+    try{
+      if(it.kind==="dir"){ var full=jp(root,it.rel); if(fso.FolderExists(full)){ present=true; count=countFiles(fso.GetFolder(full)); } }
+      else if(it.kind==="userfile"){ var hits=findUserFiles(root, it.user); count=hits.length;
+        if(hits.length){ present=true; viewPath=hits[0]; for(var k=0;k<hits.length;k++){ try{ size+=fso.GetFile(hits[k]).Size; }catch(e2){} if(IOCS.length && fileHasIoc(hits[k])) ioc=true; } } }
+      else { var fp=jp(root,it.rel); if(fso.FileExists(fp)){ present=true; size=fso.GetFile(fp).Size; viewPath=fp;
+        if(IOCS.length && size>0 && size<1048576) ioc=fileHasIoc(fp); } }
+    }catch(e){}
+    PERSIST.push({label:it.label, rel:relLabel, dir:(it.kind==="dir"), userfile:(it.kind==="userfile"), present:present, size:size, count:count, ioc:ioc, path:viewPath});
+  }
+}
+function countFiles(fo){ var n=0; try{ var e=new Enumerator(fo.Files); for(;!e.atEnd();e.moveNext()) n++;
+  var s=new Enumerator(fo.SubFolders); for(;!s.atEnd();s.moveNext()) n+=countFiles(s.item()); }catch(e){} return n; }
+function fileHasIoc(path){ try{ var t=lc(readUtf8(path)); for(var i=0;i<IOCS.length;i++){ if(t.indexOf(IOCS[i])>=0) return true; } }catch(e){} return false; }
+function firstFile(root, rels){ var fso=new ActiveXObject("Scripting.FileSystemObject");
+  for(var i=0;i<rels.length;i++){ var p=jp(root,rels[i]); if(fso.FileExists(p)) return p; } return ""; }
+function firstFolder(root, rels){ var fso=new ActiveXObject("Scripting.FileSystemObject");
+  for(var i=0;i<rels.length;i++){ var p=jp(root,rels[i]); if(fso.FolderExists(p)) return p; } return ""; }
+
+/* ---------- Inventory (v0.3): a catalog map of key UAC artifacts, present/absent, with a link to
+   open the raw file's folder in Explorer. "file" resolves the first existing candidate path;
+   "dir" checks a folder; "userfile" searches per-user homes under [root]. ---------- */
+var INV_CATALOG=[
+  {cat:"Processes",  name:"Process list (ps -ef)",        kind:"file", rels:["live_response/process/ps_-ef.txt","live_response/process/ps_-axo_pid_user_lstart_args.txt"], desc:"Running processes with PID/PPID/user/command"},
+  {cat:"Processes",  name:"Full exe paths",               kind:"file", rels:["live_response/process/running_processes_full_paths.txt"], desc:"/proc/<pid>/exe -> target (incl. (deleted))"},
+  {cat:"Processes",  name:"Running-process hashes",       kind:"file", rels:["live_response/process/hash_running_processes.sha1"], desc:"SHA1 of each running executable"},
+  {cat:"Processes",  name:"Hidden PIDs",                  kind:"file", rels:["live_response/process/hidden_pids_for_ps_command.txt"], desc:"PIDs in /proc but hidden from ps (rootkit signal)"},
+  {cat:"Processes",  name:"Open files (lsof)",            kind:"file", rels:["live_response/process/lsof_-nPl.txt","live_response/process/lsof.txt"], desc:"Open file descriptors per process"},
+  {cat:"Processes",  name:"Process tree",                 kind:"file", rels:["live_response/process/pstree_-a.txt","live_response/process/pstree.txt"], desc:"Parent/child process hierarchy"},
+  {cat:"Network",    name:"Sockets (ss)",                 kind:"file", rels:["live_response/network/ss_-tanp.txt","live_response/network/ss_-anp.txt"], desc:"TCP/UDP sockets + owning process"},
+  {cat:"Network",    name:"Netstat",                      kind:"file", rels:["live_response/network/netstat_-anp.txt","live_response/network/netstat_-an.txt"], desc:"Connections (fallback for ss)"},
+  {cat:"Network",    name:"Interfaces (ip/ifconfig)",     kind:"file", rels:["live_response/network/ip_addr_show.txt","live_response/network/ifconfig_-a.txt"], desc:"NIC addresses"},
+  {cat:"Network",    name:"Routing table",                kind:"file", rels:["live_response/network/ip_route_show.txt","live_response/network/netstat_-rn.txt"], desc:"Routes"},
+  {cat:"Network",    name:"Firewall (iptables/nft)",      kind:"file", rels:["live_response/network/iptables_-L_-v_-n.txt","live_response/network/nft.txt"], desc:"Packet-filter rules"},
+  {cat:"Network",    name:"ARP cache",                    kind:"file", rels:["live_response/network/arp_-a.txt"], desc:"Neighbour / ARP entries"},
+  {cat:"Logons",     name:"Auth log",                     kind:"file", rels:["[root]/var/log/auth.log","[root]/var/log/secure"], desc:"sshd Accepted/Failed, sudo, su"},
+  {cat:"Logons",     name:"Login history (last)",         kind:"file", rels:["live_response/system/last.txt"], desc:"wtmp session history"},
+  {cat:"Logons",     name:"Failed logins (lastb)",        kind:"file", rels:["live_response/system/lastb.txt"], desc:"btmp failed-login history"},
+  {cat:"Logons",     name:"Per-user last login",          kind:"file", rels:["live_response/system/lastlog.txt"], desc:"lastlog table"},
+  {cat:"Logons",     name:"Logged-in users (who)",        kind:"file", rels:["live_response/system/who.txt"], desc:"Current sessions at collection"},
+  {cat:"Accounts",   name:"/etc/passwd",                  kind:"file", rels:["[root]/etc/passwd"], desc:"Accounts, UIDs, shells, home dirs"},
+  {cat:"Accounts",   name:"/etc/shadow",                  kind:"file", rels:["[root]/etc/shadow"], desc:"Password hashes / lock state"},
+  {cat:"Accounts",   name:"/etc/group",                   kind:"file", rels:["[root]/etc/group"], desc:"Group membership (sudo/wheel/docker)"},
+  {cat:"Accounts",   name:"sudoers",                      kind:"file", rels:["[root]/etc/sudoers"], desc:"sudo privilege grants"},
+  {cat:"Persistence",name:"Root crontab",                 kind:"file", rels:["[root]/etc/crontab"], desc:"System-wide cron jobs"},
+  {cat:"Persistence",name:"cron.d",                       kind:"dir",  rels:["[root]/etc/cron.d"], desc:"Drop-in cron jobs"},
+  {cat:"Persistence",name:"User crontabs",               kind:"dir",  rels:["[root]/var/spool/cron/crontabs","[root]/var/spool/cron"], desc:"Per-user cron jobs"},
+  {cat:"Persistence",name:"systemd (etc) units",          kind:"dir",  rels:["[root]/etc/systemd/system"], desc:"Admin/attacker-added services & timers"},
+  {cat:"Persistence",name:"rc.local",                     kind:"file", rels:["[root]/etc/rc.local"], desc:"Legacy boot script"},
+  {cat:"Persistence",name:"ld.so.preload",                kind:"file", rels:["[root]/etc/ld.so.preload"], desc:"Global library injection (usually absent)"},
+  {cat:"Persistence",name:"SSH authorized_keys",          kind:"userfile", user:".ssh/authorized_keys", desc:"Per-user SSH access (keys / forced commands)"},
+  {cat:"System",     name:"UAC acquisition log",          kind:"file", rels:["uac.log"], desc:"Collection provenance + errors"},
+  {cat:"System",     name:"Kernel / OS (uname)",          kind:"file", rels:["live_response/system/uname_-a.txt","live_response/system/uname.txt"], desc:"Kernel version / arch"},
+  {cat:"System",     name:"Loaded modules (lsmod)",       kind:"file", rels:["live_response/system/lsmod.txt","live_response/system/kernel_modules.txt"], desc:"Kernel modules (LKM rootkits)"},
+  {cat:"System",     name:"Kernel params (sysctl)",       kind:"file", rels:["live_response/system/sysctl_-a.txt","live_response/system/sysctl.txt"], desc:"Runtime kernel settings"},
+  {cat:"System",     name:"Environment",                  kind:"file", rels:["live_response/system/env.txt"], desc:"Collection-time environment vars"},
+  {cat:"Filesystem", name:"Bodyfile (timeline)",          kind:"file", rels:["bodyfile/bodyfile.txt"], desc:"Full MAC-times filesystem timeline"},
+  {cat:"Filesystem", name:"On-disk exe hashes",           kind:"file", rels:["hash_executables/hash_executables.sha1"], desc:"SHA1 of every executable on disk (dormant implants)"},
+  {cat:"Filesystem", name:"SUID files",                   kind:"file", rels:["system/suid.txt","live_response/system/suid.txt"], desc:"setuid binaries (privesc)"},
+  {cat:"Filesystem", name:"Mounts / fstab",               kind:"file", rels:["live_response/storage/mount.txt","[root]/etc/fstab"], desc:"Mounted filesystems"},
+  {cat:"Logs",       name:"/var/log",                     kind:"dir",  rels:["[root]/var/log"], desc:"System log tree"},
+  {cat:"Logs",       name:"Package install log",          kind:"file", rels:["[root]/var/log/dpkg.log","[root]/var/log/yum.log"], desc:"dpkg/rpm install history (attacker tooling)"},
+  {cat:"Logs",       name:"Syslog / messages",            kind:"file", rels:["[root]/var/log/syslog","[root]/var/log/messages"], desc:"General system log"},
+  {cat:"Containers", name:"Docker",                       kind:"file", rels:["live_response/containers/docker_ps.txt","live_response/containers/docker_info.txt"], desc:"docker ps / info"},
+  {cat:"Containers", name:"Podman",                       kind:"file", rels:["live_response/containers/podman_ps.txt","live_response/containers/podman_info.txt"], desc:"podman ps / info"}
+];
+var INVENTORY=[];
+function buildInventory(root){
+  INVENTORY=[];
+  var fso=new ActiveXObject("Scripting.FileSystemObject");
+  for(var i=0;i<INV_CATALOG.length;i++){ var it=INV_CATALOG[i], present=false, size=0, count=0, path="";
+    try{
+      if(it.kind==="dir"){ path=firstFolder(root, it.rels); if(path){ present=true; count=countFiles(fso.GetFolder(path)); } }
+      else if(it.kind==="userfile"){ var hits=findUserFiles(root, it.user); count=hits.length;
+        if(hits.length){ present=true; path=hits[0]; for(var k=0;k<hits.length;k++){ try{ size+=fso.GetFile(hits[k]).Size; }catch(e2){} } } }
+      else { path=firstFile(root, it.rels); if(path){ present=true; size=fso.GetFile(path).Size; } }
+    }catch(e){}
+    INVENTORY.push({cat:it.cat, name:it.name, desc:it.desc, kind:it.kind, present:present, size:size, count:count, path:path,
+      blob:lc(it.cat+" "+it.name+" "+it.desc)});
+  }
+}
+
+/* ============ v0.2 - Logons, dormant hashes, packages, containers, persistence deep-parse ============ */
+
+/* ---- Enhancement 1: Logons & Users ----
+   Richest source is auth.log/secure (structured sshd events with user+IP+result); last/lastb add
+   session + failed history from wtmp/btmp. Syslog lines carry no year → we stamp the capture year
+   (from uac.log) so the case window and sort work. */
+function monthNum(m){ var M={jan:0,feb:1,mar:2,apr:3,may:4,jun:5,jul:6,aug:7,sep:8,oct:9,nov:10,dec:11};
+  return M[String(m).substring(0,3).toLowerCase()]; }
+function captureYear(){ var m=String(META.started||"").match(/^(\d{4})/); return m?parseInt(m[1],10):(new Date()).getUTCFullYear(); }
+function logonEpoch(mon, day, hms){ var mo=monthNum(mon); if(mo==null) return 0;
+  var t=String(hms||"0:0:0").split(":"); var y=captureYear();
+  return Math.floor(Date.UTC(y, mo, parseInt(day,10)||1, parseInt(t[0],10)||0, parseInt(t[1],10)||0, parseInt(t[2],10)||0)/1000); }
+function pushLogon(ep, when, result, user, ip, method, src){
+  var r={ kind:"logon", epoch:ep||0, when:when||"", result:result||"", user:user||"", ip:ip||"",
+          method:method||"", src:src||"", score:0, tags:[], reasons:[] };
+  r.blob=lc((user||"")+" "+(ip||"")+" "+(method||"")+" "+(result||""));
+  LOGON.push(r);
+}
+function parseLogons(root){
+  LOGON=[];
+  var i, m, lines;
+  // auth.log / secure (may be rotated .1) - sshd Accepted/Failed
+  var authp=firstFile(root, ["[root]/var/log/auth.log","[root]/var/log/auth.log.1","[root]/var/log/secure","[root]/var/log/secure.1"]);
+  if(authp){
+    lines=readLines(authp);
+    for(i=0;i<lines.length;i++){
+      m=lines[i].match(/^(\w{3})\s+(\d+)\s+(\d{2}:\d{2}:\d{2}).*sshd\[\d+\]:\s+(Accepted|Failed)\s+(\S+)\s+for\s+(invalid user\s+)?(\S+)\s+from\s+(\S+)\s+port\s+(\d+)/);
+      if(!m) continue;
+      var ep=logonEpoch(m[1],m[2],m[3]);
+      var when=fmtLogonWhen(ep, m[1]+" "+m[2]+" "+m[3]);
+      pushLogon(ep, when, m[4]==="Accepted"?"accepted":"failed", (m[6]?"(invalid) ":"")+m[7], m[8], m[5], "auth.log");
+    }
+  }
+  // lastb (btmp) - failed logins;  last (wtmp) - sessions.  Best-effort column parse.
+  parseLastFile(firstFile(root, ["live_response/system/lastb_-i.txt","live_response/system/lastb.txt"]), "failed");
+  parseLastFile(firstFile(root, ["live_response/system/last_-i.txt","live_response/system/last.txt"]), "session");
+  scoreLogons();
+}
+function fmtLogonWhen(ep, raw){ if(ep){ var d=new Date(ep*1000);
+    return d.getUTCFullYear()+"-"+p2n(d.getUTCMonth()+1)+"-"+p2n(d.getUTCDate())+" "+p2n(d.getUTCHours())+":"+p2n(d.getUTCMinutes())+":"+p2n(d.getUTCSeconds()); }
+  return raw||""; }
+function parseLastFile(path, result){
+  if(!path) return; var lines=readLines(path);
+  for(var i=0;i<lines.length;i++){ var ln=lines[i]; var t=trimStr(ln);
+    if(t==="" || /^(wtmp|btmp) begins/i.test(t) || /^reboot\b/.test(t) || /^shutdown\b/.test(t)) continue;
+    var toks=t.split(/\s+/); if(toks.length<4) continue;
+    var user=toks[0];
+    // find an IP/host token (numeric with -i, else 3rd col) and a Www Mmm DD HH:MM date
+    var ip=""; for(var k=1;k<toks.length;k++){ if(/^\d{1,3}(\.\d{1,3}){3}$/.test(toks[k])||/:/.test(toks[k])&&/[0-9a-f]/i.test(toks[k])&&toks[k].indexOf(".")<0&&toks[k].length>3){ ip=toks[k]; break; } }
+    var dm=t.match(/(\w{3})\s+(\w{3})\s+(\d+)\s+(\d{2}:\d{2})(?::(\d{2}))?/);
+    var ep=0, when=t;
+    if(dm){ ep=logonEpoch(dm[2], dm[3], dm[4]+":"+(dm[5]||"00")); when=fmtLogonWhen(ep, dm[0]); }
+    pushLogon(ep, when, result, user, ip, result==="failed"?"login":"session", baseName(path));
+  }
+}
+var LOGON_ALLOW_PORTS={};
+function scoreLogons(){
+  // pre-pass: per-source-IP failure counts + set of IPs that later had an accepted login
+  var failByIp={}, acceptedIps={}, i, r;
+  for(i=0;i<LOGON.length;i++){ r=LOGON[i];
+    if(r.result==="failed" && r.ip) failByIp[r.ip]=(failByIp[r.ip]||0)+1;
+    if(r.result==="accepted" && r.ip) acceptedIps[r.ip]=1; }
+  for(i=0;i<LOGON.length;i++){ r=LOGON[i]; r.tags=[]; r.reasons=[]; r.score=0;
+    var h=iocHit(r.blob);
+    if(h){ r.score+=3; r.tags.push("IOC"); r.reasons.push("IOC/keyword hit: "+h); }
+    var ext=(r.ip && !ipIsLocal(r.ip));
+    if(ext){ r.score+=2; r.tags.push("EXTERNAL"); r.reasons.push("login source is a public IP "+r.ip); }
+    if(r.result==="failed"){ r.score+=1; r.tags.push("FAILED"); r.reasons.push("failed authentication");
+      if(r.ip && failByIp[r.ip]>=5){ r.score+=2; r.tags.push("SPRAY"); r.reasons.push(failByIp[r.ip]+" failed logins from "+r.ip+" (brute-force / spray)"); } }
+    if(r.result==="accepted"){
+      if(/^\(?root/.test(lc(r.user)) && ext){ r.score+=1; r.tags.push("ROOTEXT"); r.reasons.push("root login from a public IP"); }
+      if(r.ip && failByIp[r.ip]>=5){ r.score+=3; r.tags.push("BRUTEWIN"); r.reasons.push("accepted login from "+r.ip+" which also had "+failByIp[r.ip]+" failures - likely successful brute force"); }
+    }
+  }
+}
+
+/* ---- Enhancement 2: dormant-implant SHA1 match ----
+   hash_executables/hash_executables.sha1 hashes every on-disk executable (not just running ones),
+   so matching it against SHA1-shaped IOC terms catches implants that aren't currently running. */
+function sweepHashExecutables(root){
+  if(!IOCS.length) return;
+  var sha={}; for(var s=0;s<IOCS.length;s++){ if(IOCS[s].length===40) sha[IOCS[s]]=1; }
+  var any=false, k; for(k in sha){ if(sha.hasOwnProperty(k)){ any=true; break; } }
+  if(!any) return;
+  var lines=readLines(jp(root,"hash_executables/hash_executables.sha1"));
+  for(var i=0;i<lines.length;i++){ var m=lines[i].match(/^([0-9a-fA-F]{40})\s+(.+)$/); if(!m) continue;
+    var hx=m[1].toLowerCase(); if(sha[hx]){
+      IOCHITS.push({file:trimStr(m[2]), line:0, ioc:hx, excerpt:"on-disk executable SHA1 matches IOC (DORMANT - not necessarily running)"});
+    } }
+}
+
+/* ---- Enhancement 3: persistence deep-parse ----
+   Read the actual content of persistence files, pull the command lines out, and score them with
+   the same command heuristics used for processes. Turns "present" into scored findings. */
+function pushPersFind(src, detail, cmd){
+  var r={ kind:"persfind", src:src, detail:detail||"", cmd:trimStr(cmd||""), score:0, tags:[], reasons:[] };
+  r.blob=lc((cmd||"")+" "+(detail||""));
+  // score the extracted command with the process command heuristics
+  var h=iocHit(r.blob);
+  if(h){ r.score+=3; r.tags.push("IOC"); r.reasons.push("IOC/keyword hit: "+h); }
+  if(underTmp(r.cmd)){ r.score+=2; r.tags.push("TMPEXEC"); r.reasons.push("references a temp/ram path"); }
+  if(hasHidden(r.cmd)){ r.score+=1; r.tags.push("HIDDEN"); r.reasons.push("hidden path component"); }
+  if(isShellCmd(r.cmd)){ r.score+=2; r.tags.push("SHELLCMD"); r.reasons.push("interactive/decoder shell pattern"); }
+  if(/\b(curl|wget)\b/.test(lc(r.cmd)) && /https?:\/\//.test(lc(r.cmd))){ r.score+=1; r.tags.push("NET-FETCH"); r.reasons.push("fetches from a URL"); }
+  PERSFIND.push(r);
+}
+function readTextCapped(path){ try{ var sz=fileSize(path); if(sz>1048576) return ""; return readUtf8(path); }catch(e){ return ""; } }
+function deepParseCronText(src, text){
+  var lines=String(text).split("\n");
+  for(var i=0;i<lines.length;i++){ var ln=trimStr(lines[i]);
+    if(ln==="" || ln.charAt(0)==="#") continue;
+    // env assignment lines (SHELL=, PATH=, MAILTO=) aren't jobs
+    if(/^[A-Z_]+\s*=/.test(ln)) continue;
+    var m=ln.match(/^(@\w+|(?:\S+\s+){5})(\S.*)$/);  // @reboot cmd  OR  5 time fields + cmd(+user)
+    if(!m) continue;
+    var rest=m[2];
+    // /etc/crontab & cron.d have a user field before the command; user crontabs don't. Heuristic:
+    // if the first token looks like a bare username and the second starts a path/command, drop it.
+    var rt=rest.match(/^(\S+)\s+(\/\S.*|\S+\s+\S.*)$/);
+    var cmd = (src.indexOf("cron.d")>=0 || src.indexOf("/etc/crontab")>=0) && rt ? rt[2] : rest;
+    pushPersFind(src, "cron: "+trunc(m[1],20), cmd);
+  }
+}
+function deepParseSystemdUnit(src, text){
+  var lines=String(text).split("\n");
+  for(var i=0;i<lines.length;i++){ var m=lines[i].match(/^\s*ExecStart(?:Pre|Post)?\s*=\s*[-@+!]*\s*(.+)$/i);
+    if(m) pushPersFind(src, "systemd ExecStart", m[1]); }
+}
+function deepParseAuthorizedKeys(src, text){
+  var lines=String(text).split("\n");
+  for(var i=0;i<lines.length;i++){ var ln=trimStr(lines[i]); if(ln==="" || ln.charAt(0)==="#") continue;
+    // a forced command in an authorized_keys entry is a classic persistence/backdoor mechanism
+    var fc=ln.match(/command="([^"]+)"/i);
+    if(fc){ pushPersFind(src, "authorized_keys forced command", fc[1]); }
+    else if(iocHit(lc(ln))){ pushPersFind(src, "authorized_keys entry (IOC)", ln); }
+  }
+}
+function deepParsePersistence(root){
+  PERSFIND=[];
+  var fso=new ActiveXObject("Scripting.FileSystemObject"), t, i;
+  // /etc/crontab
+  t=readTextCapped(jp(root,"[root]/etc/crontab")); if(t) deepParseCronText("/etc/crontab", t);
+  // /etc/cron.d/*
+  var cd=jp(root,"[root]/etc/cron.d");
+  if(fso.FolderExists(cd)){ try{ var e=new Enumerator(fso.GetFolder(cd).Files); for(;!e.atEnd();e.moveNext()){
+    var f=e.item(); t=readTextCapped(f.Path+""); if(t) deepParseCronText("/etc/cron.d/"+f.Name, t); } }catch(er){} }
+  // per-user crontabs under /var/spool/cron[/crontabs]
+  var spoolDirs=["[root]/var/spool/cron/crontabs","[root]/var/spool/cron"];
+  for(i=0;i<spoolDirs.length;i++){ var sd=jp(root,spoolDirs[i]);
+    if(fso.FolderExists(sd)){ try{ var se=new Enumerator(fso.GetFolder(sd).Files); for(;!se.atEnd();se.moveNext()){
+      var sf=se.item(); t=readTextCapped(sf.Path+""); if(t) deepParseCronText("crontab("+sf.Name+")", t); } }catch(er2){} break; } }
+  // systemd units: /etc/systemd/system + /lib/systemd/system (scan .service files)
+  var unitDirs=["[root]/etc/systemd/system","[root]/lib/systemd/system","[root]/usr/lib/systemd/system"];
+  for(i=0;i<unitDirs.length;i++){ scanUnits(root, unitDirs[i]); }
+  // rc.local
+  t=readTextCapped(jp(root,"[root]/etc/rc.local"));
+  if(t){ var rl=t.split("\n"); for(i=0;i<rl.length;i++){ var ln=trimStr(rl[i]);
+    if(ln!=="" && ln.charAt(0)!=="#" && !/^exit\s+0/.test(ln) && !/^#!\s*\//.test(ln)) pushPersFind("/etc/rc.local","rc.local",ln); } }
+  // ld.so.preload - a NON-EMPTY one is itself suspicious
+  t=readTextCapped(jp(root,"[root]/etc/ld.so.preload"));
+  if(t){ var pl=t.split("\n"); for(i=0;i<pl.length;i++){ var pv=trimStr(pl[i]); if(pv!=="" && pv.charAt(0)!=="#"){
+    var r={kind:"persfind", src:"/etc/ld.so.preload", detail:"preloaded library", cmd:pv, score:3, tags:["PRELOAD"], reasons:["ld.so.preload entry - global library injection ("+pv+")"]}; r.blob=lc(pv);
+    var hh=iocHit(r.blob); if(hh){ r.score+=3; r.tags.push("IOC"); r.reasons.push("IOC hit: "+hh); } PERSFIND.push(r); } } }
+  // authorized_keys (per-user)
+  var hits=findUserFiles(root, ".ssh/authorized_keys");
+  for(i=0;i<hits.length;i++){ t=readTextCapped(hits[i]); if(t) deepParseAuthorizedKeys("authorized_keys ("+userLabel(hits[i])+")", t); }
+}
+function userLabel(p){ p=String(p).replace(/\\/g,"/"); var m=p.match(/\[root\]\/(?:home\/([^\/]+)|(root))\//i); return m?(m[1]||m[2]):baseName(parentDir(parentDir(p))); }
+function scanUnits(root, rel){
+  var fso=new ActiveXObject("Scripting.FileSystemObject"), dir=jp(root,rel);
+  if(!fso.FolderExists(dir)) return;
+  try{ var e=new Enumerator(fso.GetFolder(dir).Files);
+    for(;!e.atEnd();e.moveNext()){ var f=e.item(); if(!/\.service$/i.test(f.Name+"")) continue;
+      var t=readTextCapped(f.Path+""); if(t) deepParseSystemdUnit(rel.replace("[root]","")+"/"+f.Name, t); }
+  }catch(er){}
+  // one level of subfolders (…/multi-user.target.wants etc. are usually symlinks Windows dropped, so shallow is fine)
+}
+
+/* ---- Enhancement 4a: recent package installs within the case window ---- */
+function parsePackages(root){
+  PKGS=[];
+  var win=(DFROM||DTO), i, m;
+  // dpkg.log: "YYYY-MM-DD HH:MM:SS install <pkg>:<arch> <old> <new>"
+  var dp=firstFile(root, ["[root]/var/log/dpkg.log","[root]/var/log/dpkg.log.1"]);
+  if(dp){ var dl=readLines(dp);
+    for(i=0;i<dl.length;i++){ m=dl[i].match(/^(\d{4})-(\d{2})-(\d{2})\s+(\d{2}:\d{2}:\d{2})\s+install\s+(\S+)\s+\S+\s+(\S+)/);
+      if(!m) continue; var day=Number(m[1]+m[2]+m[3]);
+      if(win && !inDay(day)) continue;
+      PKGS.push({ when:m[1]+"-"+m[2]+"-"+m[3]+" "+m[4], day:day, mgr:"dpkg", pkg:m[5], ver:m[6], blob:lc(m[5]) });
+    }
+  }
+  // rpm/yum: "/var/log/yum.log" or dnf "… Installed: pkg-ver"
+  var yp=firstFile(root, ["[root]/var/log/yum.log","[root]/var/log/dnf.rpm.log"]);
+  if(yp){ var yl=readLines(yp);
+    for(i=0;i<yl.length;i++){ m=yl[i].match(/^(\w{3})\s+(\d+)\s+(\d{2}:\d{2}:\d{2})\s+.*Installed:\s+(\S+)/);
+      if(!m) continue; var ep=logonEpoch(m[1],m[2],m[3]); var d=new Date(ep*1000);
+      var day=Number(d.getUTCFullYear()+""+p2n(d.getUTCMonth()+1)+p2n(d.getUTCDate()));
+      if(win && !inDay(day)) continue;
+      PKGS.push({ when:fmtLogonWhen(ep,m[0]), day:day, mgr:"rpm", pkg:m[4], ver:"", blob:lc(m[4]) });
+    }
+  }
+  PKGS.sort(function(a,b){ return b.day-a.day; });
+}
+
+/* ---- Enhancement 4b: running containers ---- */
+function parseContainers(root){
+  CONTAINERS=[];
+  parseContainerPs(root, ["live_response/containers/docker_ps_-a.txt","live_response/containers/docker_ps.txt"], "docker");
+  parseContainerPs(root, ["live_response/containers/podman_ps_-a.txt","live_response/containers/podman_ps.txt"], "podman");
+}
+function parseContainerPs(root, rels, engine){
+  var p=firstFile(root, rels); if(!p) return;
+  var lines=readLines(p); if(!lines.length) return;
+  // header: CONTAINER ID  IMAGE  COMMAND  CREATED  STATUS  PORTS  NAMES - split on 2+ spaces
+  var hdr=lines[0]; if(!/CONTAINER ID/i.test(hdr)) return;
+  for(var i=1;i<lines.length;i++){ var t=trimStr(lines[i]); if(t==="") continue;
+    var cols=lines[i].split(/\s{2,}/); // wide-gap columns
+    var id=trimStr(cols[0]||""), image=trimStr(cols[1]||""), cmd=trimStr(cols[2]||""),
+        status=trimStr(cols[4]||cols[3]||""), names=trimStr(cols[cols.length-1]||"");
+    var r={ kind:"container", engine:engine, id:id, image:image, cmd:cmd, status:status, names:names, score:0, tags:[], reasons:[] };
+    r.blob=lc(image+" "+cmd+" "+names);
+    var h=iocHit(r.blob); if(h){ r.score+=3; r.tags.push("IOC"); r.reasons.push("IOC hit: "+h); }
+    if(/:latest|^[0-9a-f]{12}$/.test(lc(image))===false && image.indexOf("/")<0 && image!==""){ } // (no score, just parsed)
+    CONTAINERS.push(r);
+  }
+}
+
+/* IOC sweep - walk the extracted tree, line-scan texty files < 5MB */
+function sweepIocs(root){
+  IOCHITS=[]; if(!IOCS.length) return;
+  var fso=new ActiveXObject("Scripting.FileSystemObject");
+  var budget={files:0, max:20000, capped:false};
+  try{ sweepFolder(fso.GetFolder(root), root, budget); }catch(e){ appendLog("IOC sweep stopped: "+e.message); }
+  if(budget.capped) appendLog("IOC sweep CAPPED at "+nf(budget.max)+" files - the tree is larger than the sweep budget; deeper paths were NOT scanned. Narrow the capture or sweep specific files manually.");
+  // emit ioc_hits.csv
+  try{
+    var out=["file,line,ioc,excerpt"];
+    for(var i=0;i<IOCHITS.length;i++){ var h=IOCHITS[i];
+      out.push(cq(h.file)+","+cq(h.line)+","+cq(h.ioc)+","+cq(h.excerpt)); }
+    if(LASTOUTDIR) writeUtf8(LASTOUTDIR+"\\ioc_hits.csv", out.join("\r\n"));
+  }catch(e2){}
+}
+function sweepFolder(fo, root, budget){
+  var name=lc(fo.Name+"");
+  if(name==="hash_executables") return;    // binaries dir - skip
+  var e=new Enumerator(fo.Files);
+  for(; !e.atEnd(); e.moveNext()){
+    if(budget.files>=budget.max){ budget.capped=true; return; }
+    var f=e.item();
+    if(f.Size<=0 || f.Size>5242880) continue;
+    budget.files++;
+    scanFileForIoc(f.Path+"", root);
+  }
+  var s=new Enumerator(fo.SubFolders);
+  for(; !s.atEnd(); s.moveNext()){ if(budget.files>=budget.max){ budget.capped=true; return; } sweepFolder(s.item(), root, budget); }
+}
+function scanFileForIoc(path, root){
+  try{
+    var t=readUtf8(path);
+    if(t.indexOf("\0")>=0) return;   // binary
+    var low=t.toLowerCase();
+    var hitAny=false, i;
+    for(i=0;i<IOCS.length;i++){ if(low.indexOf(IOCS[i])>=0){ hitAny=true; break; } }
+    if(!hitAny) return;
+    var rel=path.substring(root.length).replace(/^[\\\/]+/,"");
+    var lines=t.split("\n");
+    for(var L=0;L<lines.length;L++){ var ln=lines[L], lnl=ln.toLowerCase();
+      for(i=0;i<IOCS.length;i++){ if(lnl.indexOf(IOCS[i])>=0){
+        IOCHITS.push({file:rel, line:(L+1), ioc:IOCS[i], excerpt:trimStr(trunc(ln,300))});
+        if(IOCHITS.length>5000) return;
+        break;
+      } }
+    }
+  }catch(e){}
+}
+
+/* ---------- scoring ---------- */
+var TMPDIRS=["/tmp/","/var/tmp/","/dev/shm/","/run/user/"];
+function underTmp(p){ p=lc(p); for(var i=0;i<TMPDIRS.length;i++){ if(p.indexOf(TMPDIRS[i])>=0) return true; } return false; }
+function hasHidden(p){ return /\/\.[^\/]/.test(String(p)); }
+function ipIsLocal(ip){
+  ip=String(ip||""); if(ip===""||ip==="*"||ip==="::"||ip==="0.0.0.0") return true;
+  if(ip.indexOf("127.")===0) return true;
+  if(ip.indexOf("10.")===0) return true;
+  if(ip.indexOf("192.168.")===0) return true;
+  if(/^172\.(1[6-9]|2\d|3[01])\./.test(ip)) return true;
+  if(ip.indexOf("169.254.")===0) return true;
+  var l=ip.toLowerCase();
+  if(l==="::1") return true;
+  if(l.indexOf("fe80")===0) return true;
+  if(l.charAt(0)==="f" && (l.charAt(1)==="c"||l.charAt(1)==="d")) return true;   // ULA fc00::/7
+  if(l.indexOf("::ffff:")===0) return ipIsLocal(l.substring(7));
+  return false;
+}
+function iocHit(blob){ for(var i=0;i<IOCS.length;i++){ if(blob.indexOf(IOCS[i])>=0) return IOCS[i]; } return ""; }
+var HIPORT_OK={ "22":1,"53":1,"80":1,"443":1,"3306":1,"5432":1,"8080":1,"8443":1,"9090":1,"25":1,"110":1,"143":1,"993":1,"995":1,"111":1,"631":1 };
+function rescoreAll(){
+  IOCS=parseTerms($("iocBox").value);
+  var i,r,tag,rs,h;
+  PROCSCORE={};
+  for(i=0;i<PROC.length;i++){ r=PROC[i]; r.tags=[]; r.reasons=[]; r.score=0;
+    var pathish=r.exe||firstToken(r.cmd);
+    h=iocHit(r.blob);
+    if(h){ r.score+=3; r.tags.push("IOC"); r.reasons.push("IOC/keyword hit: "+h); }
+    else if(r.sha1){ for(var s=0;s<IOCS.length;s++){ if(IOCS[s].length===40 && r.sha1===IOCS[s]){ r.score+=3; r.tags.push("IOC"); r.reasons.push("running-process SHA1 matches IOC "+r.sha1); break; } } }
+    if(underTmp(pathish)){ r.score+=2; r.tags.push("TMPEXEC"); r.reasons.push("executable under a temp/ram path: "+pathish); }
+    if(hasHidden(pathish)){ r.score+=1; r.tags.push("HIDDEN"); r.reasons.push("hidden path component: "+pathish); }
+    if(isShellCmd(r.cmd)){ r.score+=2; r.tags.push("SHELLCMD"); r.reasons.push("interactive/decoder shell pattern in command line"); }
+    if(isMasq(r.cmd)){ r.score+=2; r.tags.push("MASQ"); r.reasons.push("kernel-thread-like name but not a bracketed kthread"); }
+    if(r.deleted){ r.score+=3; r.tags.push("DELETED"); r.reasons.push("running binary deleted from disk (/proc/<pid>/exe -> ... (deleted))"); }
+    if(r.hidden){
+      // corroborated = ps saw it too, or /proc left exe/sha1/start evidence. An uncorroborated
+      // hidden-pid is USUALLY a transient-pid race during collection (field-verified: real
+      // captures show hidden pids with zero /proc traces) - surface it, don't flag it.
+      var corrob = (r.user!=="(hidden)") || !!(r.exe || r.sha1 || r.start);
+      if(corrob){ r.score+=3; r.tags.push("HIDDEN-PID"); r.reasons.push("PID present in /proc but hidden from ps (hidden_pids_for_ps_command.txt)"); }
+      else { r.score+=2; r.tags.push("HIDDEN-PID?"); r.reasons.push("listed in hidden_pids but NO /proc corroboration (no exe/sha1/start) - commonly a transient-pid race during collection, not a rootkit; verify manually"); }
+    }
+    if(r.pid) PROCSCORE[r.pid]=r.score;
+  }
+  for(i=0;i<NET.length;i++){ r=NET[i]; r.tags=[]; r.reasons=[]; r.score=0;
+    h=iocHit(r.blob);
+    if(h){ r.score+=3; r.tags.push("IOC"); r.reasons.push("IOC/keyword hit: "+h); }
+    var est=/^(ESTAB|ESTABLISHED)$/i.test(r.state);
+    if(est && r.peerAddr && !ipIsLocal(r.peerAddr)){ r.score+=2; r.tags.push("EXTERNAL"); r.reasons.push("established connection to public IP "+r.peerAddr); }
+    if(/^(LISTEN)$/i.test(r.state)){ var pn=parseInt(r.localPort,10);
+      if(pn>1024 && !HIPORT_OK[String(pn)]){ r.score+=1; r.tags.push("HIPORT"); r.reasons.push("listening on non-standard high port "+r.localPort); } }
+    if(r.procPid && PROCSCORE[r.procPid]!=null && PROCSCORE[r.procPid]>=3){ r.score+=2; r.tags.push("SUSPROC"); r.reasons.push("owning process (pid "+r.procPid+") is flagged suspicious"); }
+  }
+  for(i=0;i<TIMEL.length;i++){ r=TIMEL[i]; r.tags=[]; r.reasons=[]; r.score=0;
+    h=iocHit(r.blob);
+    if(h){ r.score+=3; r.tags.push("IOC"); r.reasons.push("IOC/keyword hit: "+h); }
+    var execBit=/x/.test(String(r.mode));
+    if(underTmp(r.path) && execBit){ r.score+=1; r.tags.push("TMPEXEC"); r.reasons.push("executable file under a temp/ram path"); }
+    if(hasHidden(r.path)){ r.score+=1; r.tags.push("HIDDEN"); r.reasons.push("hidden path component"); }
+    if(/s/i.test(String(r.mode))){ r.score+=1; r.tags.push("SETUID"); r.reasons.push("setuid/setgid mode bit"); }
+  }
+  // v0.2 datasets: logons (own pre-pass rescore), persistence findings, containers all re-score
+  // against the current IOC list. hash_executables dormant hits are re-run in the sweep, not here.
+  scoreLogons();
+  for(i=0;i<PERSFIND.length;i++){ rescorePersFind(PERSFIND[i]); }
+  for(i=0;i<CONTAINERS.length;i++){ r=CONTAINERS[i]; r.tags=[]; r.reasons=[]; r.score=0;
+    h=iocHit(r.blob); if(h){ r.score+=3; r.tags.push("IOC"); r.reasons.push("IOC hit: "+h); } }
+}
+function rescorePersFind(r){
+  r.tags=[]; r.reasons=[]; r.score=0;
+  if(r.src==="/etc/ld.so.preload"){ r.score+=3; r.tags.push("PRELOAD"); r.reasons.push("ld.so.preload entry - global library injection ("+r.cmd+")"); }
+  var h=iocHit(r.blob);
+  if(h){ r.score+=3; r.tags.push("IOC"); r.reasons.push("IOC/keyword hit: "+h); }
+  if(underTmp(r.cmd)){ r.score+=2; r.tags.push("TMPEXEC"); r.reasons.push("references a temp/ram path"); }
+  if(hasHidden(r.cmd)){ r.score+=1; r.tags.push("HIDDEN"); r.reasons.push("hidden path component"); }
+  if(isShellCmd(r.cmd)){ r.score+=2; r.tags.push("SHELLCMD"); r.reasons.push("interactive/decoder shell pattern"); }
+  if(/\b(curl|wget)\b/.test(lc(r.cmd)) && /https?:\/\//.test(lc(r.cmd))){ r.score+=1; r.tags.push("NET-FETCH"); r.reasons.push("fetches from a URL"); }
+}
+function firstToken(s){ s=trimStr(String(s||"")); var sp=s.indexOf(" "); return sp>=0?s.substring(0,sp):s; }
+function isShellCmd(cmd){ var c=lc(cmd);
+  return /(^|\s)(nc|ncat|socat)\s/.test(c) || /(bash|sh|zsh)\s+-i/.test(c) || /base64\s+(-d|--decode)/.test(c)
+    || /python[0-9.]*\s+-c/.test(c) || /perl\s+-e/.test(c) || /(curl|wget)\b.*\|\s*(ba)?sh/.test(c)
+    || /\/dev\/tcp\//.test(c); }
+/* kernel-thread masquerade: the process NAME (basename of the first token) apes a kthread but
+   isn't bracketed. Deliberately excludes `watchdog` / `migration` - both collide with legitimate
+   userland software (/usr/sbin/watchdog package, app "migration" tooling paths). */
+function isMasq(cmd){ cmd=trimStr(cmd); if(cmd.charAt(0)==="[") return false;
+  var tok=firstToken(cmd); var base=tok.substring(tok.lastIndexOf("/")+1).toLowerCase();
+  return /^(kworker|ksoftirqd|kthreadd|kswapd|rcu_)/.test(base); }
+
+/* ---------- tab / render dispatch ---------- */
+function setTab(t, quiet){
+  TAB=t;
+  var ids={overview:"tabOverview",proc:"tabProc",net:"tabNet",logon:"tabLogon",time:"tabTime",ioc:"tabIoc",inv:"tabInv"};
+  for(var k in ids){ if(ids.hasOwnProperty(k)){ $(ids[k]).className=(k===t)?"btn on":"btn"; } }
+  var isOv=(t==="overview");
+  showEl("ovCard",isOv); showEl("tblCard",!isOv);
+  showEl("dateWrap", t==="time" || t==="logon");
+  if(!isOv){ $("q").value=QUERY; }
+  if(!quiet) render();
+}
+function render(){
+  if(TAB==="overview"){ renderOverview(); return; }
+  if(TAB==="proc") renderProc();
+  else if(TAB==="net") renderNet();
+  else if(TAB==="logon") renderLogon();
+  else if(TAB==="time") renderTime();
+  else if(TAB==="ioc") renderIoc();
+  else if(TAB==="inv") renderInventory();
+}
+
+/* ---------- overview ---------- */
+function kvRow(k,v){ return '<div><span class="k">'+esc(k)+'</span> '+esc(v||"-")+'</div>'; }
+function statCard(n,l,cls){ return '<span class="stat'+(cls?(" "+cls):"")+'"><span class="n">'+esc(n)+'</span><span class="l">'+esc(l)+'</span></span>'; }
+function flaggedCount(arr){ var n=0; for(var i=0;i<arr.length;i++) if(arr[i].score>=3) n++; return n; }
+function renderOverview(){
+  var h="";
+  h+=kvRow("Host", META.host);
+  h+=kvRow("OS / arch", (META.os||"")+(META.arch?(" / "+META.arch):""));
+  h+=kvRow("UAC version", META.uacVer);
+  h+=kvRow("Collected (host TZ)", META.started+(META.tz?("  "+META.tz):""));
+  if(META.hostDate) h+=kvRow("Host clock at collection", META.hostDate);
+  if(META.bootTime) h+=kvRow("Boot time", META.bootTime+" (host local)");
+  if(META.uptime) h+=kvRow("Uptime", META.uptime+(META.loadAvg?("   load avg "+META.loadAvg):""));
+  h+=kvRow("Running as", META.runAs);
+  h+=kvRow("Command line", META.cmdLine);
+  if(META.elapsed) h+=kvRow("Collection took", META.elapsed+" s");
+  h+=kvRow("Collector commands", META.cmdTotal+(META.failed?("  ("+META.failed+" failed/timed out)"):""));
+  $("ovMeta").innerHTML=h;
+
+  var pf=flaggedCount(PROC), nfl=flaggedCount(NET), lf=flaggedCount(LOGON), tf=flaggedCount(TIMEL), pff=flaggedCount(PERSFIND);
+  var s="";
+  s+=statCard(nf(PROC.length),"processes",pf?"flag":"");
+  if(pf) s+=statCard(nf(pf),"flagged proc","flag");
+  s+=statCard(nf(NET.length),"connections",nfl?"flag":"");
+  if(nfl) s+=statCard(nf(nfl),"flagged conn","flag");
+  s+=statCard(nf(LOGON.length),"logons",lf?"flag":"");
+  if(lf) s+=statCard(nf(lf),"flagged logon","flag");
+  s+=statCard(nf(TIMEL.length),"timeline",tf?"flag":"");
+  if(TIMECAP.total>TIMECAP.shown) s+=statCard(nf(TIMECAP.total),"bodyfile total","warn");
+  if(PERSFIND.length) s+=statCard(nf(PERSFIND.length),"persist. cmds",pff?"flag":"");
+  s+=statCard(nf(IOCHITS.length),"IOC hits",IOCHITS.length?"flag":"");
+  if(META.failed) s+=statCard(nf(META.failed),"failed cmds","warn");
+  $("ovStats").innerHTML=s;
+  if(TIMECAP.total>TIMECAP.shown){
+    $("ovStats").innerHTML+='<div class="muted" style="font-size:11px;margin-top:6px">Timeline capped at '+nf(TIMECAP.shown)+' of '+nf(TIMECAP.total)+' bodyfile rows - narrow with the case window (/from /to) on the Timeline tab.</div>';
+  }
+
+  // top findings: highest-scoring rows across ALL datasets
+  var all=[]; var i;
+  for(i=0;i<PROC.length;i++) if(PROC[i].score>=3) all.push({s:PROC[i].score,k:"proc",lab:trunc(PROC[i].cmd,70)});
+  for(i=0;i<NET.length;i++) if(NET[i].score>=3) all.push({s:NET[i].score,k:"net",lab:NET[i].proto+" "+NET[i].local+"→"+NET[i].peer});
+  for(i=0;i<LOGON.length;i++) if(LOGON[i].score>=3) all.push({s:LOGON[i].score,k:"logon",lab:LOGON[i].result+" "+LOGON[i].user+" from "+LOGON[i].ip});
+  for(i=0;i<PERSFIND.length;i++) if(PERSFIND[i].score>=3) all.push({s:PERSFIND[i].score,k:"persist",lab:PERSFIND[i].src+": "+trunc(PERSFIND[i].cmd,55)});
+  for(i=0;i<TIMEL.length;i++) if(TIMEL[i].score>=3) all.push({s:TIMEL[i].score,k:"time",lab:trunc(TIMEL[i].path,70)});
+  all.sort(function(a,b){ return b.s-a.s; });
+  var th="";
+  for(i=0;i<all.length && i<16;i++){ th+='<div><span class="sc '+scClass(all[i].s)+'">'+all[i].s+'</span> <span class="muted">['+all[i].k+']</span> '+esc(all[i].lab)+'</div>'; }
+  if(!all.length) th='<div class="ok">No rows scored suspicious (score ≥ 3) in this capture.</div>';
+  $("ovTop").innerHTML=th;
+
+  renderPersFind(); renderPackages(); renderContainers();
+  // persistence grid: click name to view contents; "open" opens the raw file's folder in Explorer
+  var ph="<thead><tr><th>Artifact</th><th>Present</th><th>Size / files</th><th>Path (relative)</th><th>Raw file</th></tr></thead><tbody>";
+  for(i=0;i<PERSIST.length;i++){ var it=PERSIST[i];
+    var pres = it.present ? (it.ioc?'<span class="pflag">present, IOC</span>':'<span class="pgood">present</span>') : '<span class="pmiss">absent</span>';
+    var sz = it.present ? ((it.dir||it.userfile) ? (nf(it.count)+" file(s)"+(it.userfile&&it.size?(", "+fmtSize(it.size)):"")) : fmtSize(it.size)) : "-";
+    var clickable = (it.present && it.path);
+    var open = (it.present && it.path) ? '<span class="lnk" data-open="'+esc(it.path)+'" title="Open the containing folder in Explorer (file selected)">open folder</span>' : '<span class="muted">-</span>';
+    ph+='<tr>'
+      +'<td'+(clickable?(' class="lnk" data-pf="'+i+'" style="cursor:pointer" title="View file contents in the detail pane"'):'')+'>'+esc(it.label)+'</td>'
+      +'<td>'+pres+'</td><td class="mono">'+esc(sz)+'</td><td class="mono muted">'+esc(it.rel)+'</td><td class="mono">'+open+'</td></tr>';
+  }
+  ph+="</tbody>"; $("pTbl").innerHTML=ph; setupColResizeFor($("pTbl"),"ov_persist");
+}
+function scClass(s){ return s>=5?"sc5":(s>=3?"sc3":(s>=1?"sc1":"sc0")); }
+
+/* ---------- Overview sub-sections (v0.2) ---------- */
+function renderPersFind(){
+  // A real host has hundreds of benign cron/systemd ExecStart lines - surface only the ones a
+  // heuristic scored (>=1), and note how many benign entries were parsed but hidden.
+  var rows=[]; for(var i=0;i<PERSFIND.length;i++){ if(PERSFIND[i].score>=1) rows.push(PERSFIND[i]); }
+  var hidden=PERSFIND.length-rows.length;
+  showEl("persFindWrap", rows.length>0);
+  if(!rows.length){ $("pfTbl").innerHTML=""; return; }
+  rows.sort(function(a,b){ return b.score-a.score; });
+  var h="<thead><tr><th>Score</th><th>Source</th><th>Kind</th><th>Command line</th></tr></thead><tbody>";
+  for(i=0;i<rows.length;i++){ var r=rows[i]; var rc=rowCls(r);
+    h+='<tr'+(rc?(' class="'+rc+'"'):'')+'><td class="first"><span class="sc '+scClass(r.score)+'">'+r.score+'</span>'+tagsHtml(r)+'</td>'
+      +'<td class="mono muted" title="'+esc(r.src)+'">'+esc(trunc(r.src,34))+'</td>'
+      +'<td class="mono muted">'+esc(r.detail)+'</td>'
+      +'<td class="mono" title="'+esc(r.cmd)+'">'+esc(trunc(r.cmd,120))+'</td></tr>'; }
+  if(hidden>0) h+='<tr><td colspan="4" class="muted">'+nf(hidden)+' benign persistence command line(s) parsed and scored 0 (not shown)</td></tr>';
+  h+="</tbody>"; $("pfTbl").innerHTML=h; setupColResizeFor($("pfTbl"),"ov_persfind");
+}
+function renderPackages(){
+  showEl("pkgWrap", PKGS.length>0);
+  $("pkgWinLbl").innerHTML=(DFROM||DTO)?"- within case window":"- all (set /from /to to focus)";
+  if(!PKGS.length){ $("pkgTbl").innerHTML=""; return; }
+  var h="<thead><tr><th>Installed (UTC)</th><th>Mgr</th><th>Package</th><th>Version</th></tr></thead><tbody>";
+  for(var i=0;i<PKGS.length && i<300;i++){ var p=PKGS[i]; var isIoc=iocHit(p.blob);
+    h+='<tr'+(isIoc?' class="ioc row-flag"':'')+'><td class="mono'+(isIoc?' first':'')+'">'+esc(p.when)+'</td><td class="mono muted">'+esc(p.mgr)+'</td>'
+      +'<td class="mono">'+esc(p.pkg)+(isIoc?' <span class="tag ioc">IOC</span>':'')+'</td><td class="mono muted">'+esc(p.ver)+'</td></tr>'; }
+  h+="</tbody>"; $("pkgTbl").innerHTML=h; setupColResizeFor($("pkgTbl"),"ov_pkg");
+}
+function renderContainers(){
+  showEl("ctrWrap", CONTAINERS.length>0);
+  if(!CONTAINERS.length){ $("ctrTbl").innerHTML=""; return; }
+  var h="<thead><tr><th>Engine</th><th>Image</th><th>Command</th><th>Status</th><th>Name</th></tr></thead><tbody>";
+  for(var i=0;i<CONTAINERS.length;i++){ var c=CONTAINERS[i]; var rc=rowCls(c);
+    h+='<tr'+(rc?(' class="'+rc+'"'):'')+'><td class="mono'+(rc?' first':'')+'">'+esc(c.engine)+tagsHtml(c)+'</td>'
+      +'<td class="mono" title="'+esc(c.image)+'">'+esc(trunc(c.image,28))+'</td><td class="mono muted" title="'+esc(c.cmd)+'">'+esc(trunc(c.cmd,26))+'</td>'
+      +'<td class="mono muted">'+esc(trunc(c.status,20))+'</td><td class="mono">'+esc(c.names)+'</td></tr>'; }
+  h+="</tbody>"; $("ctrTbl").innerHTML=h; setupColResizeFor($("ctrTbl"),"ov_ctr");
+}
+
+/* ---------- shared table rendering ---------- */
+function tagsHtml(r){ var h=""; for(var i=0;i<r.tags.length;i++){ var t=r.tags[i];
+  var cls=(t==="IOC")?"ioc":"sus"; h+='<span class="tag '+cls+'" title="'+esc(r.reasons.join("; "))+'">'+esc(t)+'</span>'; } return h; }
+function scoreCell(r){ return '<td class="first"><span class="sc '+scClass(r.score)+'">'+r.score+'</span>'+tagsHtml(r)+'</td>'; }
+function rowCls(r){ var c=""; if(r.score>=5) c="row-flag"; else if(r.score>=3) c="row-warn"; if(hasIocTag(r)) c+=(c?" ":"")+"ioc"; return c; }
+function hasIocTag(r){ for(var i=0;i<r.tags.length;i++) if(r.tags[i]==="IOC") return true; return false; }
+function passQ(r){ if(SUSONLY && r.score<3) return false; if(QUERY && r.blob.indexOf(QUERY)<0) return false; return true; }
+function sortRows(rows, cols, st){
+  var sk=cols[st.k].sk, dir=st.d;
+  rows.sort(function(a,b){ var x=sk(a),y=sk(b);
+    if(typeof x==="number"&&typeof y==="number") return (x-y)*dir;
+    x=String(x); y=String(y); return x<y?-dir:(x>y?dir:0); });
+}
+function drawTable(cols, rows, st, tabkey){
+  var shown=rows.length>MAXROWS?MAXROWS:rows.length;
+  var html="<thead><tr>";
+  for(var c=0;c<cols.length;c++){ var arrow=(st.k===c)?(st.d>0?" ▲":" ▼"):"";
+    html+='<th data-k="'+c+'">'+esc(cols[c].h)+arrow+'</th>'; }
+  html+="</tr></thead><tbody>";
+  for(var i=0;i<shown;i++){ var r=rows[i]; var rc=rowCls(r);
+    html+='<tr data-i="'+i+'"'+(rc?(' class="'+rc+'"'):'')+' style="cursor:pointer">';
+    for(var k=0;k<cols.length;k++){ html+=cols[k].cell(r); }
+    html+="</tr>";
+  }
+  html+="</tbody>";
+  $("tbl").innerHTML=html;
+  $("count").innerHTML=nf(rows.length)+" row"+(rows.length===1?"":"s")+(shown<rows.length?(" (showing "+nf(shown)+")"):"");
+  var ths=$("tbl").getElementsByTagName("th");
+  for(var j=0;j<ths.length;j++){ ths[j].onclick=function(e){ e=e||window.event; var t=e.target||e.srcElement;
+    if(t && /\bcgrip\b/.test(t.className+"")) return;
+    var kk=parseInt(this.getAttribute("data-k"),10);
+    if(st.k===kk) st.d*=-1; else { st.k=kk; st.d=1; } render(); }; }
+  applyFreeze(); setupColResize();
+  window.__viewRows=rows.slice(0,shown);
+  window.__fullRows=rows;
+}
+
+/* processes table */
+var PCOLS=[
+  {h:"Score / tags", sk:function(r){return r.score;}, cell:function(r){return scoreCell(r);}},
+  {h:"User", sk:function(r){return lc(r.user);}, cell:function(r){return '<td class="mono">'+esc(r.user)+'</td>';}},
+  {h:"PID", sk:function(r){return parseInt(r.pid,10)||0;}, cell:function(r){return '<td class="mono" style="text-align:right">'+esc(r.pid)+(r.hidden?' <span class="tag ioc">hidden</span>':'')+'</td>';}},
+  {h:"PPID", sk:function(r){return parseInt(r.ppid,10)||0;}, cell:function(r){return '<td class="mono" style="text-align:right">'+esc(r.ppid)+'</td>';}},
+  {h:"Start", sk:function(r){return lc(r.start);}, cell:function(r){return '<td class="mono muted">'+esc(r.start)+'</td>';}},
+  {h:"Command", sk:function(r){return lc(r.cmd);}, cell:function(r){return '<td class="mono" title="'+esc(r.cmd)+'">'+esc(trunc(r.cmd,140))+'</td>';}}
+];
+function renderProc(){ var rows=[]; for(var i=0;i<PROC.length;i++) if(passQ(PROC[i])) rows.push(PROC[i]);
+  sortRows(rows,PCOLS,SORT.proc); drawTable(PCOLS,rows,SORT.proc,"proc"); }
+
+/* network table */
+var NCOLS=[
+  {h:"Score / tags", sk:function(r){return r.score;}, cell:function(r){return scoreCell(r);}},
+  {h:"Proto", sk:function(r){return r.proto;}, cell:function(r){return '<td class="mono">'+esc(r.proto)+'</td>';}},
+  {h:"State", sk:function(r){return r.state;}, cell:function(r){return '<td class="mono">'+esc(r.state)+'</td>';}},
+  {h:"Local", sk:function(r){return lc(r.local);}, cell:function(r){return '<td class="mono" title="'+esc(r.local)+'">'+esc(r.local)+'</td>';}},
+  {h:"Remote", sk:function(r){return lc(r.peer);}, cell:function(r){return '<td class="mono" title="'+esc(r.peer)+'">'+esc(r.peer)+'</td>';}},
+  {h:"Process", sk:function(r){return lc(r.procName);}, cell:function(r){return '<td class="mono muted">'+esc(r.procName?(r.procName+(r.procPid?(" ("+r.procPid+")"):"")):trimStr(r.procRaw))+'</td>';}}
+];
+function renderNet(){ var rows=[]; for(var i=0;i<NET.length;i++) if(passQ(NET[i])) rows.push(NET[i]);
+  sortRows(rows,NCOLS,SORT.net); drawTable(NCOLS,rows,SORT.net,"net"); }
+
+/* logon table (v0.2) */
+function logonDay(ep){ if(!ep) return 0; var d=new Date(ep*1000);
+  return Number(d.getUTCFullYear()+""+p2n(d.getUTCMonth()+1)+p2n(d.getUTCDate())); }
+var LCOLS=[
+  {h:"Score / tags", sk:function(r){return r.score;}, cell:function(r){return scoreCell(r);}},
+  {h:"When (UTC)", sk:function(r){return r.epoch;}, cell:function(r){return '<td class="mono">'+esc(r.when)+'</td>';}},
+  {h:"Result", sk:function(r){return r.result;}, cell:function(r){return '<td class="mono">'+esc(r.result)+'</td>';}},
+  {h:"User", sk:function(r){return lc(r.user);}, cell:function(r){return '<td class="mono">'+esc(r.user)+'</td>';}},
+  {h:"Source", sk:function(r){return lc(r.ip);}, cell:function(r){return '<td class="mono" title="'+esc(r.ip)+'">'+esc(r.ip||"(local)")+'</td>';}},
+  {h:"Method", sk:function(r){return r.method;}, cell:function(r){return '<td class="mono muted">'+esc(r.method)+'</td>';}},
+  {h:"Source file", sk:function(r){return r.src;}, cell:function(r){return '<td class="mono muted">'+esc(r.src)+'</td>';}}
+];
+function renderLogon(){
+  var rows=[]; for(var i=0;i<LOGON.length;i++){ var r=LOGON[i];
+    if(!passQ(r)) continue;
+    if((DFROM||DTO) && r.epoch){ if(!inDay(logonDay(r.epoch))) continue; }   // case window filters logons too
+    rows.push(r); }
+  sortRows(rows,LCOLS,SORT.logon); drawTable(LCOLS,rows,SORT.logon,"logon");
+  if(!LOGON.length){ $("tbl").innerHTML='<thead><tr><th>Logons</th></tr></thead><tbody><tr><td class="muted">No auth.log / last / lastb entries in this capture (empty on hosts with no interactive logins, e.g. WSL). On a server this view fills with SSH accepted/failed events.</td></tr></tbody>'; $("count").innerHTML="0 rows"; }
+}
+
+/* timeline table */
+function epochShort(sec){ if(!sec) return "-"; var d=new Date(sec*1000);
+  return d.getUTCFullYear()+"-"+p2n(d.getUTCMonth()+1)+"-"+p2n(d.getUTCDate())+" "+p2n(d.getUTCHours())+":"+p2n(d.getUTCMinutes()); }
+var TCOLS=[
+  {h:"Score / tags", sk:function(r){return r.score;}, cell:function(r){return scoreCell(r);}},
+  {h:"mtime (UTC)", sk:function(r){return r.mtime;}, cell:function(r){return '<td class="mono">'+esc(epochShort(r.mtime))+'</td>';}},
+  {h:"ctime (UTC)", sk:function(r){return r.ctime;}, cell:function(r){return '<td class="mono muted">'+esc(epochShort(r.ctime))+'</td>';}},
+  {h:"Size", sk:function(r){return r.size;}, cell:function(r){return '<td class="mono" style="text-align:right">'+esc(fmtSize(r.size))+'</td>';}},
+  {h:"Mode", sk:function(r){return r.mode;}, cell:function(r){return '<td class="mono">'+esc(r.mode)+'</td>';}},
+  {h:"UID", sk:function(r){return parseInt(r.uid,10)||0;}, cell:function(r){return '<td class="mono" style="text-align:right">'+esc(r.uid)+'</td>';}},
+  {h:"Path", sk:function(r){return lc(r.path);}, cell:function(r){return '<td class="mono" title="'+esc(r.path)+'">'+esc(trunc(r.path,150))+'</td>';}}
+];
+function renderTime(){ var rows=[]; for(var i=0;i<TIMEL.length;i++) if(passQ(TIMEL[i])) rows.push(TIMEL[i]);
+  sortRows(rows,TCOLS,SORT.time); drawTable(TCOLS,rows,SORT.time,"time"); }
+
+/* inventory table (v0.3) - catalog map of key artifacts; click "open folder" to see the raw file */
+function renderInventory(){
+  var rows=[]; for(var i=0;i<INVENTORY.length;i++){ var it=INVENTORY[i];
+    if(QUERY && it.blob.indexOf(QUERY)<0) continue;
+    rows.push(it); }
+  var present=0; for(i=0;i<INVENTORY.length;i++) if(INVENTORY[i].present) present++;
+  var html="<thead><tr><th>Category</th><th>Artifact</th><th>Description</th><th>Present</th><th>Size / files</th><th>Raw file</th></tr></thead><tbody>";
+  for(i=0;i<rows.length;i++){ var r=rows[i];
+    var pres = r.present ? '<span class="pgood">present</span>' : '<span class="pmiss">absent</span>';
+    var sz = r.present ? ((r.kind==="dir"||r.kind==="userfile") ? (nf(r.count)+" file(s)"+(r.size?(", "+fmtSize(r.size)):"")) : fmtSize(r.size)) : "-";
+    var open = r.present && r.path ? '<span class="lnk" data-open="'+esc(r.path)+'" title="Open the containing folder in Explorer (file selected)">open folder</span>' : '<span class="muted">-</span>';
+    html+='<tr'+(r.present?"":' style="opacity:.55"')+'><td class="mono muted">'+esc(r.cat)+'</td><td>'+esc(r.name)+'</td>'
+      +'<td class="muted">'+esc(r.desc)+'</td><td>'+pres+'</td><td class="mono">'+esc(sz)+'</td><td class="mono">'+open+'</td></tr>'; }
+  html+="</tbody>"; $("tbl").innerHTML=html;
+  $("count").innerHTML=nf(present)+" of "+nf(INVENTORY.length)+" key artifacts present"+(QUERY?(" ("+nf(rows.length)+" match filter)"):"");
+  applyFreeze(); setupColResizeFor($("tbl"),"inv");
+  window.__fullRows=[];   // inventory has no scored rows to export via the standard path
+}
+
+/* ioc hits table */
+var ICOLS=[
+  {h:"File", sk:function(r){return lc(r.file);}, cell:function(r){return '<td class="mono first" title="'+esc(r.file)+'">'+esc(trunc(r.file,80))+'</td>';}},
+  {h:"Line", sk:function(r){return r.line;}, cell:function(r){return '<td class="mono" style="text-align:right">'+esc(r.line)+'</td>';}},
+  {h:"IOC", sk:function(r){return r.ioc;}, cell:function(r){return '<td class="mono"><span class="tag ioc">'+esc(r.ioc)+'</span></td>';}},
+  {h:"Excerpt", sk:function(r){return lc(r.excerpt);}, cell:function(r){return '<td class="mono" title="'+esc(r.excerpt)+'">'+esc(trunc(r.excerpt,140))+'</td>';}}
+];
+function renderIoc(){
+  var rows=[]; for(var i=0;i<IOCHITS.length;i++){ var r=IOCHITS[i];
+    if(QUERY){ var bl=lc(r.file+" "+r.ioc+" "+r.excerpt); if(bl.indexOf(QUERY)<0) continue; }
+    rows.push(r); }
+  var st=SORT.ioc, sk=ICOLS[st.k].sk, dir=st.d;
+  rows.sort(function(a,b){ var x=sk(a),y=sk(b);
+    if(typeof x==="number"&&typeof y==="number") return (x-y)*dir;
+    x=String(x); y=String(y); return x<y?-dir:(x>y?dir:0); });
+  var shown=rows.length>MAXROWS?MAXROWS:rows.length;
+  var html="<thead><tr>";
+  for(var c=0;c<ICOLS.length;c++){ var arrow=(st.k===c)?(st.d>0?" ▲":" ▼"):"";
+    html+='<th data-k="'+c+'">'+esc(ICOLS[c].h)+arrow+'</th>'; }
+  html+="</tr></thead><tbody>";
+  if(!IOCS.length){ html+='<tr><td colspan="4" class="muted">No IOC / keyword terms loaded - add some via "IOC / keywords…" then re-Analyze to sweep the tree.</td></tr>'; }
+  else if(!rows.length){ html+='<tr><td colspan="4" class="ok">No IOC hits in the swept tree.</td></tr>'; }
+  for(var i2=0;i2<shown;i2++){ var rr=rows[i2]; html+='<tr class="ioc">';
+    for(var k=0;k<ICOLS.length;k++){ html+=ICOLS[k].cell(rr); } html+="</tr>"; }
+  html+="</tbody>"; $("tbl").innerHTML=html;
+  $("count").innerHTML=nf(rows.length)+" hit"+(rows.length===1?"":"s")+(shown<rows.length?(" (showing "+nf(shown)+")"):"");
+  var ths=$("tbl").getElementsByTagName("th");
+  for(var j=0;j<ths.length;j++){ ths[j].onclick=function(e){ e=e||window.event; var t=e.target||e.srcElement;
+    if(t && /\bcgrip\b/.test(t.className+"")) return;
+    var kk=parseInt(this.getAttribute("data-k"),10);
+    if(st.k===kk) st.d*=-1; else { st.k=kk; st.d=1; } render(); }; }
+  applyFreeze(); setupColResize();
+  window.__viewRows=rows.slice(0,shown); window.__fullRows=rows;
+}
+
+/* ---------- detail pane ---------- */
+function detField(k,v){ return '<div><span class="kv">'+esc(k)+':</span> '+esc(v||"-")+'</div>'; }
+function openRowDetail(idx){
+  var rows=window.__viewRows||[]; if(idx<0||idx>=rows.length) return;
+  var r=rows[idx]; DETREC=r; DETKIND=TAB;
+  var h="";
+  if(TAB==="proc"){
+    h+='<div style="font-size:14px;margin-bottom:6px"><b>'+esc(trunc(r.cmd,120))+'</b> '+tagsHtml(r)+'</div>';
+    h+=reasonsBlock(r);
+    h+='<div class="dl">';
+    h+=detField("PID", r.pid+(r.hidden?"  (HIDDEN from ps)":""));
+    h+=detField("PPID", r.ppid);
+    h+=detField("User", r.user);
+    h+=detField("Started", r.start);
+    h+=detField("Executable", r.exe+(r.deleted?"  (DELETED from disk while running)":""));
+    h+=detField("SHA1", r.sha1);
+    h+=detField("Command", r.cmd);
+    h+='</div>';
+  } else if(TAB==="net"){
+    h+='<div style="font-size:14px;margin-bottom:6px"><b>'+esc(r.proto+" "+r.local+" → "+r.peer)+'</b> '+tagsHtml(r)+'</div>';
+    h+=reasonsBlock(r);
+    h+='<div class="dl">';
+    h+=detField("Protocol", r.proto);
+    h+=detField("State", r.state);
+    h+=detField("Local", r.local);
+    h+=detField("Remote", r.peer+(r.peerAddr&&!ipIsLocal(r.peerAddr)?"  (public)":""));
+    h+=detField("Process", r.procName+(r.procPid?(" (pid "+r.procPid+")"):"")+(r.procRaw?("  "+r.procRaw):""));
+    h+='</div>';
+  } else if(TAB==="time"){
+    h+='<div style="font-size:14px;margin-bottom:6px"><b>'+esc(trunc(r.path,120))+'</b> '+tagsHtml(r)+'</div>';
+    h+=reasonsBlock(r);
+    h+='<div class="dl">';
+    h+=detField("Path", r.path);
+    h+=detField("Mode", r.mode);
+    h+=detField("Size", fmtSize(r.size)+" ("+nf(r.size)+" bytes)");
+    h+=detField("UID / GID", r.uid);
+    h+=detField("mtime (UTC)", epochFull(r.mtime));
+    h+=detField("atime (UTC)", epochFull(r.atime));
+    h+=detField("ctime (UTC)", epochFull(r.ctime));
+    h+=detField("crtime (UTC)", epochFull(r.crtime));
+    h+='</div>';
+  } else if(TAB==="logon"){
+    h+='<div style="font-size:14px;margin-bottom:6px"><b>'+esc(r.result+" - "+r.user)+'</b> '+tagsHtml(r)+'</div>';
+    h+=reasonsBlock(r);
+    h+='<div class="dl">';
+    h+=detField("When (UTC)", r.when);
+    h+=detField("Result", r.result);
+    h+=detField("User", r.user);
+    h+=detField("Source", r.ip+(r.ip&&!ipIsLocal(r.ip)?"  (public)":(r.ip?"  (local/RFC1918)":"")));
+    h+=detField("Method", r.method);
+    h+=detField("Source artifact", r.src);
+    h+='</div>';
+  }
+  $("detBody").innerHTML=h; $("detCopy").style.display=""; showEl("detailCard",true);
+}
+function reasonsBlock(r){ if(!r.reasons||!r.reasons.length) return '<div class="muted" style="font-size:12px;margin-bottom:6px">Not flagged (score '+r.score+').</div>';
+  var h='<div style="font-size:12px;color:#ff9b9b;margin-bottom:6px">Score '+r.score+':<br>'; for(var i=0;i<r.reasons.length;i++) h+="&bull; "+esc(r.reasons[i])+"<br>"; return h+'</div>'; }
+function epochFull(sec){ if(!sec) return "-"; var d=new Date(sec*1000);
+  return d.getUTCFullYear()+"-"+p2n(d.getUTCMonth()+1)+"-"+p2n(d.getUTCDate())+" "+p2n(d.getUTCHours())+":"+p2n(d.getUTCMinutes())+":"+p2n(d.getUTCSeconds())+" ("+sec+")"; }
+function openPersistFile(idx){
+  var it=PERSIST[idx]; if(!it||!it.path) return;
+  DETREC=null; DETKIND="persist";
+  var body="";
+  try{ if(it.size>1048576) body="(file is "+fmtSize(it.size)+" - too large to preview inline; open it in the output folder)";
+    else body=readUtf8(it.path); }catch(e){ body="(could not read: "+e.message+")"; }
+  var h='<div style="font-size:14px;margin-bottom:6px"><b>'+esc(it.label)+'</b> <span class="muted mono">'+esc(it.rel)+'</span></div>';
+  h+='<div class="dl">'+esc(body)+'</div>';
+  $("detBody").innerHTML=h; $("detCopy").style.display="none"; showEl("detailCard",true);
+}
+function closeDetail(){ DETREC=null; showEl("detailCard",false); $("detBody").innerHTML=""; }
+function copyDetail(){
+  if(!DETREC){ setStatus("Nothing to copy","err"); return; }
+  var r=DETREC, out=[];
+  if(DETKIND==="proc"){ out.push("PROCESS | score "+r.score+" | "+r.tags.join(","));
+    out.push("pid "+r.pid+" ppid "+r.ppid+" user "+r.user+" started "+r.start);
+    out.push("exe "+r.exe); if(r.sha1) out.push("sha1 "+r.sha1); out.push("cmd "+r.cmd); }
+  else if(DETKIND==="net"){ out.push("CONNECTION | score "+r.score+" | "+r.tags.join(","));
+    out.push(r.proto+" "+r.state+" "+r.local+" -> "+r.peer); out.push("process "+r.procName+" "+r.procRaw); }
+  else if(DETKIND==="time"){ out.push("TIMELINE | score "+r.score+" | "+r.tags.join(","));
+    out.push(r.path); out.push("mode "+r.mode+" size "+r.size+" uid "+r.uid);
+    out.push("mtime "+epochFull(r.mtime)+" ctime "+epochFull(r.ctime)+" crtime "+epochFull(r.crtime)); }
+  else if(DETKIND==="logon"){ out.push("LOGON | score "+r.score+" | "+r.tags.join(","));
+    out.push(r.when+" (UTC) "+r.result+" "+r.user+" from "+(r.ip||"local")+" via "+r.method+" ["+r.src+"]"); }
+  for(var i=0;i<r.reasons.length;i++) out.push("  - "+r.reasons[i]);
+  try{ window.clipboardData.setData("Text", out.join("\r\n")); setStatus("Copied to clipboard","ok"); }
+  catch(e){ setStatus("Copy failed: "+e.message,"err"); }
+}
+
+/* ---------- resizable columns (family verbatim, keyed per tab) ---------- */
+function colwKey(){ return TAB; }
+function colwFile(){ var d=htaFolder(); return d?(d+"\\UAC-Triage-Tool.colw.txt"):""; }
+var COLW={}, DRAG=null;
+function saveColw(){ var p=colwFile(); if(!p) return; var out=[],k;
+  for(k in COLW){ if(COLW.hasOwnProperty(k)&&COLW[k]&&COLW[k].length) out.push(k+"="+COLW[k].join(",")); }
+  try{ if(out.length) writeUtf8(p,out.join("\r\n")); else if(fileExists(p)) new ActiveXObject("Scripting.FileSystemObject").DeleteFile(p); }catch(e){} }
+function loadColw(){ var p=colwFile(); if(!p||!fileExists(p)) return;
+  try{ var lines=readUtf8(p).split(/\r?\n/);
+    for(var i=0;i<lines.length;i++){ var ln=trimStr(lines[i]); if(!ln) continue; var eq=ln.indexOf("="); if(eq<1) continue;
+      var key=ln.substring(0,eq), parts=ln.substring(eq+1).split(","), a=[], ok=true;
+      for(var j=0;j<parts.length;j++){ var n=parseInt(parts[j],10); if(!(n>=40&&n<=1600)){ ok=false; break; } a.push(n); }
+      if(ok&&a.length) COLW[key]=a; } }catch(e){} }
+function curZoom(){ try{ var el=$("content"); var z=parseFloat(el.style.zoom||(el.currentStyle&&el.currentStyle.zoom)||"");
+    if(!z && window.getComputedStyle) z=parseFloat(getComputedStyle(el).zoom); return (z&&z>0)?z:1; }catch(e){ return 1; } }
+/* Generic per-table resize: works on ANY table (main data grid + every Overview table + Inventory).
+   Each table carries its own persisted-width key in data-colwkey; grips find their table by DOM
+   walk so one set of handlers serves them all. */
+function setupColResizeFor(tbl, key){
+  if(!tbl) return; var ths=tbl.getElementsByTagName("th"); if(!ths.length) return;
+  tbl.setAttribute("data-colwkey", key);
+  var w=COLW[key];
+  if(w && w.length===ths.length){ tbl.style.tableLayout="fixed"; tbl.style.width="auto";
+    for(var j=0;j<ths.length;j++) ths[j].style.width=w[j]+"px"; }
+  else { tbl.style.tableLayout=""; tbl.style.width=""; }
+  for(var i=0;i<ths.length;i++){ var g=document.createElement("div"); g.className="cgrip"; g.setAttribute("data-ci",String(i));
+    g.title="Drag to resize this column - double-click to reset"; g.onmousedown=gripDown; g.ondblclick=gripReset; ths[i].appendChild(g); }
+}
+function setupColResize(){ setupColResizeFor($("tbl"), colwKey()); }
+function gripTable(el){ var n=el; while(n && String(n.tagName).toUpperCase()!=="TABLE"){ n=n.parentNode; } return n; }
+function gripDown(e){ e=e||window.event; var ci=parseInt(this.getAttribute("data-ci"),10);
+  var tbl=gripTable(this); if(!tbl) return false; var ths=tbl.getElementsByTagName("th"); if(isNaN(ci)||ci<0||ci>=ths.length) return false;
+  var key=tbl.getAttribute("data-colwkey")||colwKey();
+  if(!COLW[key] || COLW[key].length!==ths.length){ var w=[]; for(var i=0;i<ths.length;i++) w.push(ths[i].offsetWidth);
+    COLW[key]=w; tbl.style.tableLayout="fixed"; tbl.style.width="auto"; for(var j=0;j<ths.length;j++) ths[j].style.width=w[j]+"px"; }
+  DRAG={key:key, ci:ci, x:(e.clientX||0), w:COLW[key][ci], th:ths[ci], z:curZoom()};
+  document.onmousemove=gripMove; document.onmouseup=gripUp; document.onselectstart=function(){ return false; };
+  if(e.preventDefault) e.preventDefault(); e.returnValue=false; if(e.stopPropagation) e.stopPropagation(); e.cancelBubble=true; return false; }
+function gripMove(e){ e=e||window.event; if(!DRAG) return false; var w=Math.round(DRAG.w+((e.clientX||0)-DRAG.x)/DRAG.z);
+  if(w<40) w=40; if(w>1600) w=1600; COLW[DRAG.key][DRAG.ci]=w; DRAG.th.style.width=w+"px"; return false; }
+function gripUp(){ document.onmousemove=null; document.onmouseup=null; document.onselectstart=null; if(DRAG){ DRAG=null; try{ saveColw(); }catch(e){} } }
+function gripReset(e){ e=e||window.event; document.onmousemove=null; document.onmouseup=null; document.onselectstart=null; DRAG=null;
+  var tbl=gripTable(this); var key=tbl?(tbl.getAttribute("data-colwkey")||colwKey()):colwKey();
+  COLW[key]=null; try{ saveColw(); }catch(er){} if(tbl){ tbl.style.tableLayout=""; tbl.style.width=""; } render();
+  setStatus("Column widths reset","ok"); if(e){ if(e.stopPropagation) e.stopPropagation(); e.cancelBubble=true; } return false; }
+function applyFreeze(){ var sc=$("tblScroll"); if(!sc) return; var ths=$("tbl").getElementsByTagName("th"); var y=sc.scrollTop;
+  for(var i=0;i<ths.length;i++){ ths[i].style.top=y+"px"; } }
+
+/* ---------- export / copy ---------- */
+function cq(v){ v=(v==null)?"":String(v); return /[",\r\n]/.test(v)?('"'+v.replace(/"/g,'""')+'"'):v; }
+function fmtSize(n){ if(!n) return "0 B"; var u=["B","KB","MB","GB"], i=0; while(n>=1024&&i<u.length-1){n/=1024;i++;} return n.toFixed(i?1:0)+" "+u[i]; }
+function exportView(){
+  if(TAB==="inv"){ var il=["Category,Artifact,Description,Present,SizeBytes,Files,Path"];
+    for(var iv=0;iv<INVENTORY.length;iv++){ var it=INVENTORY[iv];
+      il.push([cq(it.cat),cq(it.name),cq(it.desc),cq(it.present?"present":"absent"),cq(it.size),cq(it.count),cq(it.path)].join(",")); }
+    var idir=LASTOUTDIR||$("outDir").value, ipath=idir+"\\inventory_"+nowStamp()+".csv";
+    try{ writeUtf8(ipath, il.join("\r\n")); setStatus("Exported inventory ("+nf(INVENTORY.length)+" artifacts) → "+ipath,"ok"); }catch(e){ setStatus("Export failed: "+e.message,"err"); }
+    return; }
+  var rows=window.__fullRows||[]; if(!rows.length){ setStatus("Nothing to export","err"); return; }
+  var lines, head;
+  if(TAB==="proc"){ head=["Score","Tags","User","PID","PPID","Start","Exe","SHA1","Command"]; lines=[head.join(",")];
+    for(var i=0;i<rows.length;i++){ var r=rows[i]; lines.push([cq(r.score),cq(r.tags.join(";")),cq(r.user),cq(r.pid),cq(r.ppid),cq(r.start),cq(r.exe),cq(r.sha1),cq(r.cmd)].join(",")); } }
+  else if(TAB==="net"){ head=["Score","Tags","Proto","State","Local","Remote","ProcName","ProcPid"]; lines=[head.join(",")];
+    for(i=0;i<rows.length;i++){ r=rows[i]; lines.push([cq(r.score),cq(r.tags.join(";")),cq(r.proto),cq(r.state),cq(r.local),cq(r.peer),cq(r.procName),cq(r.procPid)].join(",")); } }
+  else if(TAB==="logon"){ head=["Score","Tags","When_UTC","Result","User","Source","Method","SourceFile"]; lines=[head.join(",")];
+    for(i=0;i<rows.length;i++){ r=rows[i]; lines.push([cq(r.score),cq(r.tags.join(";")),cq(r.when),cq(r.result),cq(r.user),cq(r.ip),cq(r.method),cq(r.src)].join(",")); } }
+  else if(TAB==="time"){ head=["Score","Tags","mtime_UTC","atime_UTC","ctime_UTC","crtime_UTC","Size","Mode","UID","Path"]; lines=[head.join(",")];
+    for(i=0;i<rows.length;i++){ r=rows[i]; lines.push([cq(r.score),cq(r.tags.join(";")),cq(epochFull(r.mtime)),cq(epochFull(r.atime)),cq(epochFull(r.ctime)),cq(epochFull(r.crtime)),cq(r.size),cq(r.mode),cq(r.uid),cq(r.path)].join(",")); } }
+  else if(TAB==="ioc"){ head=["File","Line","IOC","Excerpt"]; lines=[head.join(",")];
+    for(i=0;i<rows.length;i++){ r=rows[i]; lines.push([cq(r.file),cq(r.line),cq(r.ioc),cq(r.excerpt)].join(",")); } }
+  else { setStatus("Nothing to export on this tab","err"); return; }
+  var dir=LASTOUTDIR||$("outDir").value;
+  var path=dir+"\\"+TAB+"_export_"+nowStamp()+".csv";
+  try{ writeUtf8(path, lines.join("\r\n")); setStatus("Exported "+nf(lines.length-1)+" rows → "+path,"ok"); appendLog("Exported: "+path); }
+  catch(e){ setStatus("Export failed: "+e.message,"err"); }
+}
+function copyNotes(){
+  var rows=(window.__fullRows||[]).slice(0,500); if(!rows.length){ setStatus("Nothing to copy","err"); return; }
+  var out=[];
+  for(var i=0;i<rows.length;i++){ var r=rows[i];
+    if(TAB==="proc") out.push(r.score+" | pid "+r.pid+" | "+r.user+" | "+r.cmd+(r.tags.length?(" | "+r.tags.join(",")):""));
+    else if(TAB==="net") out.push(r.score+" | "+r.proto+" "+r.state+" | "+r.local+" -> "+r.peer+(r.procName?(" | "+r.procName):"")+(r.tags.length?(" | "+r.tags.join(",")):""));
+    else if(TAB==="logon") out.push(r.score+" | "+r.when+" | "+r.result+" | "+r.user+" from "+(r.ip||"local")+(r.tags.length?(" | "+r.tags.join(",")):""));
+    else if(TAB==="time") out.push(r.score+" | "+epochShort(r.mtime)+" | "+r.mode+" | "+r.path+(r.tags.length?(" | "+r.tags.join(",")):""));
+    else if(TAB==="ioc") out.push(r.file+":"+r.line+" | "+r.ioc+" | "+r.excerpt);
+  }
+  try{ window.clipboardData.setData("Text", out.join("\r\n")); setStatus("Copied "+out.length+" lines to clipboard","ok"); }
+  catch(e){ setStatus("Copy failed: "+e.message,"err"); }
+}
+
+/* ---------- IOC list ---------- */
+function applyIocs(){
+  IOCS=parseTerms($("iocBox").value);
+  $("iocInfo").innerHTML=IOCS.length?(nf(IOCS.length)+" term(s) active - re-sweeping"):"no terms";
+  if(LASTROOT){ if(IOCS.length){ setStatus("Re-sweeping tree for "+IOCS.length+" IOC term(s)…","muted");
+      window.setTimeout(function(){ sweepIocs(LASTROOT); rescoreAll(); buildPersistence(LASTROOT); render(); patchRunInfoSummary(buildRunSummary());
+        setStatus("IOC list applied - "+IOCS.length+" term(s); "+nf(IOCHITS.length)+" tree hit(s).","ok"); }, 40);
+    } else { IOCHITS=[]; rescoreAll(); render(); setStatus("IOC list cleared.","ok"); }
+  } else setStatus(IOCS.length?("IOC list set - "+IOCS.length+" term(s). Analyze a capture to apply."):"IOC list cleared","ok");
+}
+
+/* ---------- command-line invocation (family) ----------
+   mshta.exe "UAC-Triage-Tool.hta" "<archiveOrFolder>" ["<outDir>"] [/auto] [/from:yyyy-MM-dd] [/to:yyyy-MM-dd] */
+function getCommandLine(){
+  try{ var cl=uacHta.commandLine+""; if(cl && cl!=="undefined") return cl; }catch(e){}
+  try{
+    var lp=decodeURIComponent(location.pathname+"").replace(/^\//,"").replace(/\//g,"\\");
+    var fn=lp.substring(lp.lastIndexOf("\\")+1).toLowerCase(); if(!fn) return "";
+    var loc=new ActiveXObject("WbemScripting.SWbemLocator");
+    var svc=loc.ConnectServer(".","root\\cimv2");
+    var q=svc.ExecQuery("SELECT CommandLine,CreationDate FROM Win32_Process WHERE Name='mshta.exe'");
+    var best="", bestDate=""; var en=new Enumerator(q);
+    for(; !en.atEnd(); en.moveNext()){ var pr=en.item(); var pcl=(pr.CommandLine==null?"":pr.CommandLine+"");
+      if(pcl.toLowerCase().indexOf(fn)<0) continue; var cd=(pr.CreationDate==null?"":pr.CreationDate+"");
+      if(!best || cd>bestDate){ best=pcl; bestDate=cd; } }
+    return best;
+  }catch(e2){}
+  return "";
+}
+function tokenizeCmdTail(){
+  var cl=getCommandLine(); if(!cl) return [];
+  var m=cl.match(/\.hta"?/i); var tail = m ? cl.substring(m.index+m[0].length) : cl;
+  var toks=[], i=0, n=tail.length, cur="", inq=false;
+  while(i<n){ var c=tail.charAt(i);
+    if(inq){ if(c==='"'){ inq=false; } else cur+=c; i++; continue; }
+    if(c==='"'){ inq=true; i++; continue; }
+    if(c===' '||c==='\t'){ if(cur!==""){ toks.push(cur); cur=""; } i++; continue; }
+    cur+=c; i++; }
+  if(cur!=="") toks.push(cur); return toks;
+}
+var CASE_FROM="", CASE_TO="";
+function applyCaseWindow(from,to){
+  if(from){ if(/^\d{4}-\d{2}-\d{2}$/.test(from)){ CASE_FROM=from; try{ $("dfrom").value=from; DFROM=dayNum(from); }catch(e){} } else appendLog("CLI: ignoring invalid /from '"+from+"'"); }
+  if(to){ if(/^\d{4}-\d{2}-\d{2}$/.test(to)){ CASE_TO=to; try{ $("dto").value=to; DTO=dayNum(to); }catch(e2){} } else appendLog("CLI: ignoring invalid /to '"+to+"'"); }
+  if(CASE_FROM||CASE_TO) appendLog("CLI: case window "+(CASE_FROM||"…")+" .. "+(CASE_TO||"…")+" - prefilled the timeline date filter (filter only, never scored)");
+}
+function parseCli(){
+  var toks=tokenizeCmdTail();
+  var cli={input:"", outDir:"", auto:false, from:"", to:""};
+  for(var i=0;i<toks.length;i++){ var t=toks[i];
+    if(/^[\/\-]{1,2}auto$/i.test(t)){ cli.auto=true; continue; }
+    var fm=t.match(/^[\/\-]{1,2}from[:=](\d{4}-\d{2}-\d{2})$/i); if(fm){ cli.from=fm[1]; continue; }
+    var tm=t.match(/^[\/\-]{1,2}to[:=](\d{4}-\d{2}-\d{2})$/i); if(tm){ cli.to=tm[1]; continue; }
+    if(/^[\/\-]/.test(t)) continue;
+    if(!cli.input) cli.input=t; else if(!cli.outDir) cli.outDir=t;
+  }
+  return cli;
+}
+function applyCli(cli){
+  if(!cli.input) return false;
+  var fso=new ActiveXObject("Scripting.FileSystemObject");
+  applyCaseWindow(cli.from, cli.to);
+  if(fso.FolderExists(cli.input) || fso.FileExists(cli.input)){ $("inPath").value=cli.input; }
+  else { setStatus("CLI input not found: "+cli.input,"err"); appendLog("CLI input not found: "+cli.input); return false; }
+  if(cli.outDir){ $("outDir").value=cli.outDir; OUT_TOUCHED=true; hostGuessFrom(cli.outDir); }
+  else hostGuessFrom(cli.input);
+  if(cli.auto){ appendLog("CLI: /auto - analyzing "+cli.input); window.setTimeout(function(){ analyze(); }, 250); }
+  else setStatus("CLI: input prefilled. Click 'Analyze capture' to run.","muted");
+  return true;
+}
+function dayNum(s){ if(!s) return 0; var m=String(s).match(/(\d{4})-(\d{1,2})-(\d{1,2})/); if(!m) return 0;
+  function p(x){ x=String(x); return x.length<2?("0"+x):x; } return Number(m[1]+p(m[2])+p(m[3])); }
+
+/* ---------- self-update (family) ---------- */
+var SELF_REPO="bpmorris22/UAC-Triage-Tool", SELF_HTA="UAC-Triage-Tool.hta", SELF_LATEST="", SELF_ASSET_URL="";
+function selfVerNewer(r,l){ var a=String(r).split("."),b=String(l).split("."),n=Math.max(a.length,b.length);
+  for(var i=0;i<n;i++){ var x=parseInt(a[i],10)||0,y=parseInt(b[i],10)||0; if(x!==y) return x>y; } return false; }
+function selfPath(){ try{ var p=decodeURIComponent(location.pathname+"").replace(/^\//,"").replace(/\//g,"\\");
+  if(/\.hta$/i.test(p) && fileExists(p)) return p; }catch(e){} return (htaFolder()||"")+"\\"+SELF_HTA; }
+function checkSelfUpdate(){
+  try{
+    var x=new ActiveXObject("MSXML2.XMLHTTP.6.0");
+    x.open("GET","https://api.github.com/repos/"+SELF_REPO+"/releases/latest",true);
+    try{ x.setRequestHeader("User-Agent",SELF_HTA); }catch(eh){}
+    x.onreadystatechange=function(){ if(x.readyState!==4) return;
+      try{ if(x.status!==200) return; var t=x.responseText+"";
+        var m=t.match(/"tag_name"\s*:\s*"v?([0-9.]+)"/i); if(!m) return;
+        var latest=m[1]; if(!selfVerNewer(latest,APP_VERSION)) return;
+        var url="", re=/"browser_download_url"\s*:\s*"([^"]+\.hta)"/ig, mm;
+        while((mm=re.exec(t))){ if(mm[1].toLowerCase().indexOf(SELF_HTA.toLowerCase())>=0){ url=mm[1]; break; } if(!url) url=mm[1]; }
+        if(!url) url="https://github.com/"+SELF_REPO+"/releases/download/v"+latest+"/"+SELF_HTA;
+        SELF_LATEST=latest; SELF_ASSET_URL=url;
+        var b=$("selfUpd"); if(b){ b.innerHTML="Update to v"+latest; b.className="btn primary";
+          b.title="A newer "+SELF_HTA+" (v"+latest+") is on GitHub - click to download & replace this file"; }
+      }catch(e){} };
+    x.send();
+  }catch(e){}
+}
+function doSelfUpdate(){
+  if(!SELF_ASSET_URL){ setStatus("No update available (or offline).","muted"); return; }
+  var target=selfPath(); if(!target || !/\.hta$/i.test(target)){ setStatus("Can't locate this app's own file to update in place.","err"); return; }
+  if(!confirm("Download "+SELF_HTA+" v"+SELF_LATEST+" and replace this file?\n\n"+target+"\n\nAfter it downloads, close and reopen the app.")) return;
+  setStatus("Downloading v"+SELF_LATEST+"…","muted");
+  var fso=new ActiveXObject("Scripting.FileSystemObject"), tmp=fso.GetSpecialFolder(2)+"";
+  var ps1=tmp+"\\selfupd_"+uid()+".ps1";
+  var tq=String(target).replace(/'/g,"''"), uq=String(SELF_ASSET_URL).replace(/'/g,"''");
+  var L=["$ErrorActionPreference='Stop'","[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12",
+    "$u='"+uq+"'","$t='"+tq+"'","$tmp=Join-Path $env:TEMP ('selfupd_'+[guid]::NewGuid().ToString('N')+'.hta')",
+    "Invoke-WebRequest -Uri $u -OutFile $tmp -Headers @{ 'User-Agent'='"+SELF_HTA+"' }",
+    "if((Get-Item $tmp).Length -lt 2000){ throw 'downloaded file too small' }",
+    "Copy-Item $tmp $t -Force","Remove-Item $tmp -Force -ErrorAction SilentlyContinue","Write-Output 'SELFUPD_OK'"];
+  try{ var f=fso.CreateTextFile(ps1,true); f.Write(L.join("\r\n")); f.Close(); }catch(ew){ setStatus("Self-update stage failed: "+ew.message,"err"); return; }
+  try{ var r=runBat(['powershell -NoProfile -ExecutionPolicy Bypass -File "'+ps1+'" > "__LOG__" 2>&1']);
+    try{ fso.DeleteFile(ps1); }catch(e0){}
+    if((r.log+"").indexOf("SELFUPD_OK")>=0){ var b=$("selfUpd"); if(b) b.className="btn primary hide";
+      setStatus("Updated to v"+SELF_LATEST+" - CLOSE and reopen the app.","ok");
+      try{ alert("Update installed (v"+SELF_LATEST+").\n\nClose and reopen "+SELF_HTA+"."); }catch(e){}
+    } else { appendLog("--- self-update ---\n"+r.log); setStatus("Self-update failed - see log.","err"); }
+  }catch(e){ setStatus("Self-update failed: "+e.message,"err"); }
+}
+
+/* ---------- help ---------- */
+var GITHUB="https://github.com/bpmorris22/UAC-Triage-Tool";
+function openUrl(u){ try{ new ActiveXObject("WScript.Shell").Run('"'+u+'"',1,false); }catch(e){ setStatus("Could not open browser: "+e.message,"err"); } }
+function openHelp(){ try{ $("helpVer").innerHTML="v"+APP_VERSION; }catch(e){} showEl("helpModal",true); }
+function closeHelp(){ showEl("helpModal",false); }
+function openDir(){ var d=$("outDir").value; if(!d){ setStatus("No output directory set","err"); return; }
+  try{ new ActiveXObject("WScript.Shell").Run('explorer.exe "'+d+'"',1,false); }catch(e){ setStatus("Could not open folder: "+e.message,"err"); } }
+/* open the containing folder in Explorer with the file pre-selected (or just the folder for a dir) */
+function openInExplorer(path){
+  try{ var fso=new ActiveXObject("Scripting.FileSystemObject");
+    if(fso.FileExists(path)) new ActiveXObject("WScript.Shell").Run('explorer.exe /select,"'+path+'"',1,false);
+    else if(fso.FolderExists(path)) new ActiveXObject("WScript.Shell").Run('explorer.exe "'+path+'"',1,false);
+    else setStatus("Path no longer exists: "+path,"err");
+  }catch(e){ setStatus("Could not open Explorer: "+e.message,"err"); }
+}
+
+/* ---------- wiring ---------- */
+function init(){
+  try{ window.resizeTo(1360,920); }catch(e){}
+  $("appver").innerHTML="&middot; v"+APP_VERSION;
+  try{ document.title="UAC Triage Tool v"+APP_VERSION; }catch(e){}
+  $("maxrowLbl").innerHTML=nf(MAXROWS);
+  $("tblScroll").onscroll=applyFreeze;
+  resolveTar(); checkTar(); loadColw();
+
+  $("hostName").onkeyup=function(){ HOST_TOUCHED=true; syncOutDir(); };
+  $("outDir").onkeyup=function(){ OUT_TOUCHED=true; };
+  loadToolkitIoc();
+
+  var zoom=0.9, zContent=$("content");
+  function applyZoom(){ zContent.style.zoom=zoom; var p=Math.round(zoom*100)+"%";
+    $("fup").title="Larger text ("+p+")"; $("fdown").title="Smaller text ("+p+")"; }
+  applyZoom();
+  $("fup").onclick=function(){ zoom=Math.min(zoom+0.15,2.5); applyZoom(); };
+  $("fdown").onclick=function(){ zoom=Math.max(zoom-0.15,0.6); applyZoom(); };
+
+  $("procBtn").onclick=analyze;
+  $("openDirBtn").onclick=openDir;
+  $("browseBtn").onclick=function(){ $("inPick").click(); };
+  $("inPick").onchange=function(){ if(this.value){ $("inPath").value=this.value; hostGuessFrom(this.value); } };
+  $("folderBtn").onclick=function(){
+    try{ var sha=new ActiveXObject("Shell.Application");
+      var fld=sha.BrowseForFolder(0,"Select an already-extracted UAC folder (one containing uac.log).",0x51);
+      if(fld){ var p=""; try{ p=fld.Self.Path+""; }catch(e2){}
+        if(/^[a-z]:\\|^\\\\/i.test(p)){ $("inPath").value=p; hostGuessFrom(p); }
+        else if(p) setStatus("That selection has no filesystem path - pick a real folder.","err"); }
+    }catch(e){ setStatus("Folder picker unavailable: "+e.message,"err"); }
+  };
+  $("logToggle").onclick=function(){ var l=$("log");
+    if(l.style.display==="none"||!l.style.display){
+      if(!trimStr(l.innerHTML.replace(/<[^>]*>/g,""))){ l.innerHTML='<span class="muted">(empty - extraction / parse output appears here.)</span>'; l.setAttribute("data-ph","1"); }
+      l.style.display="block"; this.innerHTML="Hide log";
+    } else { l.style.display="none"; this.innerHTML="Show log"; } };
+
+  // tab bar
+  var tb=$("tabbar").getElementsByTagName("button");
+  for(var i=0;i<tb.length;i++){ tb[i].onclick=function(){ setTab(this.getAttribute("data-tab")); }; }
+
+  $("q").onkeyup=function(){ if(qTimer) window.clearTimeout(qTimer);
+    qTimer=window.setTimeout(function(){ QUERY=trimStr($("q").value).toLowerCase(); render(); },150); };
+  $("susOnly").onclick=function(){ SUSONLY=this.checked; render(); };
+  $("dfrom").onchange=function(){ DFROM=dayNum(this.value); if(LASTROOT){ reparseTimeline(); } };
+  $("dto").onchange=function(){ DTO=dayNum(this.value); if(LASTROOT){ reparseTimeline(); } };
+  $("clearBtn").onclick=function(){ $("q").value=""; QUERY=""; $("susOnly").checked=false; SUSONLY=false; render(); };
+  $("exportBtn").onclick=exportView;
+  $("copyBtn").onclick=copyNotes;
+
+  $("iocBtn2").onclick=function(){ var w=$("iocWrap"); showEl("iocWrap", /\bhide\b/.test(w.className)); };
+  $("iocApply").onclick=applyIocs;
+  $("iocLoad").onclick=function(){ $("iocPick").click(); };
+  $("iocPick").onchange=function(){ if(this.value){ try{ $("iocBox").value=readUtf8(this.value); applyIocs(); }catch(e){ setStatus("Could not read IOC file: "+e.message,"err"); } } };
+  $("detClose").onclick=closeDetail;
+  $("detCopy").onclick=copyDetail;
+
+  // row / persistence / open-folder click delegation
+  document.onclick=function(e){ e=e||window.event; var t=e.target||e.srcElement;
+    if(t && /\bcgrip\b/.test(t.className+"")) return;
+    // element-level actions first (data-open / data-pf can live on a td or span, not the tr)
+    var op=attrUp(t,"data-open"); if(op){ openInExplorer(op); return; }
+    var pfa=attrUp(t,"data-pf"); if(pfa!=null && pfa!==""){ openPersistFile(parseInt(pfa,10)); return; }
+    var n=t; while(n && n.tagName!=="TR"){ n=n.parentNode; if(n&&n.tagName==="TABLE"){ n=null; break; } }
+    if(!n||!n.getAttribute) return;
+    var pf=n.getAttribute("data-pf");
+    if(pf!=null && pf!==""){ openPersistFile(parseInt(pf,10)); return; }
+    var di=n.getAttribute("data-i");
+    if(di!=null && di!=="" && (TAB==="proc"||TAB==="net"||TAB==="logon"||TAB==="time")){ var ix=parseInt(di,10); openRowDetail(ix);
+      var trs=$("tbl").getElementsByTagName("tr");
+      for(var z=0;z<trs.length;z++){ var zi=trs[z].getAttribute("data-i");
+        if(zi!=null&&zi!==""){ var rows=window.__viewRows||[]; var zr=rows[parseInt(zi,10)]; var base=zr?rowCls(zr):"";
+          trs[z].className=(parseInt(zi,10)===ix)?((base?base+" ":"")+"sel"):base; } } }
+  };
+
+  var cli=parseCli(); var hadCli=false;
+  try{ hadCli=applyCli(cli); }catch(e){ appendLog("CLI parse error: "+e.message); }
+  if(isNetworkPath(htaFolder())) appendLog("Heads-up: running from a network location - zone policy may force ANSI IO; triage is unaffected. For full fidelity copy the folder local.");
+  if(!hadCli) setStatus("Point at a uac-*.tar.gz / .zip archive (or an extracted folder), set the hostname, and click Analyze capture.","muted");
+}
+/* case window changed after a parse - re-read the bodyfile with the new filter, rescore, redraw */
+function reparseTimeline(){
+  if(!LASTROOT) return;
+  // bodyfile + packages are window-filtered AT PARSE TIME (filter, never scored); logons filter at render
+  parseBodyfile(LASTROOT); parsePackages(LASTROOT); rescoreAll(); render();
+  appendLog("Case window "+($("dfrom").value||"…")+" .. "+($("dto").value||"…")+" applied - "+nf(TIMEL.length)+" timeline rows, "+nf(PKGS.length)+" package installs.");
+}
+window.onload=function(){ init(); try{ window.setTimeout(checkSelfUpdate,600); }catch(e){} };
+</script>
+
+<div id="helpModal" class="modal hide" onclick="if((event.srcElement||{}).id==='helpModal')closeHelp()">
+  <div class="mcard">
+    <span class="x" onclick="closeHelp()" title="Close">&times;</span>
+    <h2>UAC Triage Tool <span class="muted" style="font-size:13px;font-weight:400" id="helpVer"></span></h2>
+    <div class="gh muted">GitHub: <span class="lnk" onclick="openUrl(GITHUB)">https://github.com/bpmorris22/UAC-Triage-Tool</span></div>
+    <p>A single-file GUI for triaging <b>UAC (Unix-like Artifacts Collector)</b> output - the tarball a responder collects from a Linux / macOS / *BSD / Solaris / ESXi host. It extracts the capture with Windows' built-in <code>tar.exe</code> and turns the plain-text process, network and filesystem-timeline artifacts into scored, searchable triage views. It never runs UAC and never touches the target - feed it the archive.</p>
+    <h3>Quick start</h3>
+    <ul>
+      <li>On the *nix host: download UAC from <span class="lnk" onclick="openUrl('https://github.com/tclahr/uac/releases')">github.com/tclahr/uac</span>, then <code>cd</code> into it and run <code>./uac -p ir_triage /tmp</code> (must run from its own folder).</li>
+      <li>Copy the resulting <code>uac-&lt;host&gt;-&lt;os&gt;-&lt;ts&gt;.tar.gz</code> to this machine, drop its path in the box (or Browse…), and click <b>Analyze capture</b>. Already-extracted folder? Use <b>Pick folder…</b>.</li>
+      <li>Review <b>Overview</b> (run metadata + persistence inventory), then <b>Processes</b>, <b>Network</b>, <b>Timeline</b>, and <b>IOC hits</b>.</li>
+    </ul>
+    <h3>Scoring (suspicious = score ≥ 3)</h3>
+    <ul>
+      <li><b>Processes</b> - IOC/keyword or SHA1 hit (+3), exe under /tmp·/var/tmp·/dev/shm·/run/user (+2), hidden path component (+1), interactive/decoder shell one-liner (+2), kernel-thread masquerade (+2), running binary <b>deleted from disk</b> (+3), PID <b>hidden from ps</b> (+3 - such pids get a synthesized "(hidden)" row built from /proc data, since ps by definition can't show them).</li>
+      <li><b>Network</b> - IOC hit (+3), ESTABLISHED to a public IP (+2), LISTEN on a non-standard high port (+1), owning process itself flagged (+2).</li>
+      <li><b>Logons</b> (auth.log/secure + last/lastb) - IOC (+3), source is a public IP (+2), failed auth (+1), ≥5 failures from one IP i.e. brute/spray (+2), accepted login from an IP that also had ≥5 failures i.e. likely successful brute (+3), root login from public IP (+1).</li>
+      <li><b>Timeline</b> - IOC path hit (+3), executable under a temp path (+1), hidden component (+1), setuid/setgid (+1).</li>
+      <li><b>Persistence findings</b> (Overview) - command lines pulled from cron / systemd <code>ExecStart=</code> / authorized_keys forced-commands / rc.local, scored with the process heuristics (IOC, temp path, shell one-liner, URL fetch); a non-empty <code>ld.so.preload</code> is flagged as global library injection (+3).</li>
+      <li><b>IOC hits</b> - a tree-wide line sweep of every texty file &lt; 5 MB against your IOC list (also written to <code>ioc_hits.csv</code>), <em>plus</em> SHA1-shaped IOC terms matched against <code>hash_executables</code> to catch <b>dormant</b> on-disk implants that aren't running.</li>
+    </ul>
+    <h3>Also parsed</h3>
+    <ul>
+      <li><b>Overview</b> shows run metadata incl. the host <b>boot time</b> and <b>uptime / load</b> (from uptime), plus <b>Recent package installs</b> (dpkg/rpm, case-window filtered) and <b>Containers</b> (docker/podman ps, IOC-matched).</li>
+      <li><b>Inventory tab</b> - a map of every key artifact (processes, network, logons, accounts, persistence, system, filesystem, logs, containers) showing present/absent, size, and an <b>open folder</b> link that opens the raw file in Explorer. The Persistence &amp; config inventory on Overview has the same open-folder links; click an artifact name there to view its contents inline.</li>
+      <li><b>Resizable columns</b> everywhere - drag the right edge of any column header (it highlights on hover); double-click the edge to reset. Widths persist per view.</li>
+    </ul>
+    <h3>Command line</h3>
+    <p><code>mshta "UAC-Triage-Tool.hta" "&lt;archiveOrFolder&gt;" ["&lt;outDir&gt;"] [/auto] [/from:yyyy-MM-dd] [/to:yyyy-MM-dd]</code></p>
+    <ul>
+      <li><code>/auto</code> - extract + parse immediately. <code>&lt;outDir&gt;</code> - where extraction + runinfo land (optional).</li>
+      <li><code>/from /to</code> - case window (UTC): prefilters the <b>timeline</b> (mtime/ctime/crtime), <b>logons</b> and <b>package installs</b>, and is recorded in runinfo; never affects scoring.</li>
+      <li><b>Target hostname</b> is required - guessed from the <code>uac-&lt;host&gt;-&lt;os&gt;-&lt;ts&gt;</code> archive name; names the output folder <code>_Processed\&lt;host&gt;\UAC</code> next to this app. A shared <code>IOC.txt</code> next to the app is auto-merged into the IOC box.</li>
+    </ul>
+    <h3>Notes / limits</h3>
+    <ul>
+      <li><b>tar.exe exits 1 on UAC tarballs</b> - the archive contains Unix symlinks Windows can't create; the regular files all extract and success is judged by <code>uac.log</code> appearing. Skipped-symlink count is logged.</li>
+      <li><b>Encrypted zips</b> (UAC <code>-P</code>) can't be opened by bsdtar - extract with 7-Zip first, then use <b>Pick folder…</b>.</li>
+      <li>Collected files mirror under a directory literally named <code>[root]</code>. A full-profile <b>bodyfile</b> can be MFT-scale; the timeline is capped at 50,000 stored rows (the full total is still reported) and pre-filtered by the case window - narrow <code>/from /to</code> on a big capture to see everything in range.</li>
+      <li>All displayed times are <b>UTC</b> (bodyfile epochs). Collector commands that hung/timed out on the source host show as <em>failed</em> on the Overview and leave empty output files - that's normal.</li>
+    </ul>
+    <p class="muted" style="font-size:11px">MIT © 2026 Ben Morris - click the link above for the full README &amp; releases.</p>
+  </div>
+</div>
+
+</body>
+</html>
