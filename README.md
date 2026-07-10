@@ -29,12 +29,12 @@ Eight tabs:
 
 | Tab | Built from | Highlights |
 |---|---|---|
-| **Overview** | `uac.log`, `uptime`, `date` | Run metadata incl. **boot time / uptime**, per-dataset stat cards, cross-dataset **Top findings**, scored **Persistence findings**, package activity (with attribution), containers, integrity/journal-gap summaries, and a presence inventory with "open folder" links |
-| **Processes** | `ps -ef` + `/proc` maps | Hidden-from-ps processes are **synthesized** into rows; deleted-binary and kernel-thread-masquerade detection |
-| **Network** | `ss` / `netstat` | External connections; links each socket to its owning process |
+| **Overview** | `uac.log`, `uptime`, `date` | Run metadata incl. **boot time / uptime**, per-dataset stat cards, cross-dataset **Top findings**, scored **Persistence & system findings** (cron, systemd units **and timers**, accounts, suid/caps/hidden sweeps, **null-passphrase SSH keys**, shell histories), package activity (with attribution), **deep-inspected containers** (privileged / sensitive mounts / docker diff), integrity/journal-gap summaries, and a presence inventory |
+| **Processes** | `ps -ef` + `/proc` maps + **`top`** + **per-PID /proc** | Hidden-from-ps processes **synthesized** into rows; deleted-binary detection; **%CPU/%MEM column**; processes **only top saw** (transient/miner); **LD_PRELOAD / memfd / deleted-fd / comm-masquerade** from per-PID environ/fd/maps |
+| **Network** | `ss` / `netstat` + **`/proc/net`** | External connections; socket→process links; **hidden-socket cross-check** (in /proc/net but missing from ss); ownership **recovered on non-root captures** via uid + fd inodes |
 | **Logons** | `auth.log` (**ISO-8601 + classic syslog**), **wtmp/btmp/lastlog binaries**, `last`, `lastb` | SSH accepted/failed, **sudo / pkexec / pam sessions / account changes / su**, per-account lastlog, spray + **BRUTEWIN** detection, service-account-login and new-login-account flags |
 | **Timeline** | TSK bodyfile | Full filesystem MAC-times; case-window filterable; capped for MFT-scale captures |
-| **Logs** | journal, syslog, kern.log, sysstat, cloud-init | **Journal coverage + gap/generation-change detection**, **log-integrity** checks, **syslog service inventory**, notable events (OOM, promiscuous, USB, new units), **sar** CPU summary, **cloud-init** provisioning baseline |
+| **Logs** | journal, syslog, kern.log, sysstat, cloud-init, `journalctl` | **Journal coverage + gap/generation-change detection**, a **boots table** (`journalctl --list-boots`, with between-boot gap checks), **log-integrity** checks, **syslog service inventory**, notable events (OOM, promiscuous, USB, kernel taint, timers/units), **sar** CPU summary, **cloud-init** provisioning baseline |
 | **IOC hits** | tree sweep + `hash_executables` | Line-scan of the whole tree, **plus** SHA1 matches against on-disk (dormant) executables |
 | **Inventory** | ~50 key artifacts | Present/absent map across nine categories, each with an "open folder" link to the raw file |
 
@@ -44,7 +44,7 @@ Rotated **`.gz` logs** under `[root]/var/log` are inflated at parse time, so wee
 
 ## Scoring
 
-Rows are scored with additive rules; **≥ 3 is suspicious**. Highlights: IOC / SHA1 hit (+3), executable under a temp/ram path (+2), hidden path component (+1), interactive/decoder shell one-liner (+2), kernel-thread masquerade (+2), running binary deleted from disk (+3), PID hidden from ps (+3), external/root logins, **brute-force-then-success** (+3), **service account with an interactive login** (+3), **new account with a login shell** (+4), privilege escalation (sudo/pkexec) running a temp/shell command (+2), a populated `ld.so.preload` (+3), a **journal gap with a generation change** (integrity, high sev), suspicious package installs (nmap/socat/xmrig/…), and more. Full reference in the manual.
+Rows are scored with additive rules; **≥ 3 is suspicious**. Highlights: IOC / SHA1 hit (+3), executable under a temp/ram path (+2), interactive/decoder shell one-liner (+2), running binary deleted from disk (+3), PID hidden from ps (+3), **LD_PRELOAD in a process environment** (+3), **unrecognized memfd** fileless descriptor (+3), **hidden LISTEN socket** (in /proc/net, missing from ss, +3), service account running an interpreter seen only in top (+3), **brute-force-then-success** (+3), service account with an interactive login (+3), new account with a login shell (+4), **extra UID-0 account** (+3), privileged container / docker.sock mount (+3), a populated `ld.so.preload` (+3), null-passphrase SSH private key (+2), anti-forensics history commands (+2), a **journal gap with a generation change** (integrity, high sev), suspicious package installs (nmap/socat/xmrig/…), and more. Desktop-runtime noise (GNOME memfds, X11 lock files, upgraded-library deleted maps, renamed threads) is explicitly tuned out — verified against a real non-root ir_triage capture. Full reference in the manual.
 
 ## Command line
 
@@ -63,6 +63,7 @@ See **[`UAC-Triage-Manual.html`](UAC-Triage-Manual.html)** — a self-contained 
 - Windows' `tar.exe` (bsdtar) **returns exit code 1** on UAC tarballs because they contain Unix symlinks Windows can't create — this is expected; success is judged by `uac.log` appearing, and the regular files all extract.
 - Encrypted zips (UAC `-P`) can't be opened by bsdtar — extract with 7-Zip first and use **Pick folder…**.
 - Displayed times are **UTC** by default; a **host-TZ toggle** (Logons, Timeline, Logs) re-renders them in the collector's local time using the offset recorded in `uac.log`.
+- **Non-root captures** are first-class: the Overview states what's missing (shadow, sudoers, other users' /proc details), permission-denied caveats are summarized (capped, not spammed), and socket ownership lost from `ss` is recovered from `/proc/net` + fd inodes.
 - Rotated-log inflation and the sar/journal parsers use **PowerShell** (already present on Windows 10+) for `.gz` decompression; if PowerShell is unavailable, rotated history simply stays compressed and everything else still works.
 
 ## Requirements
