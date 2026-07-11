@@ -306,7 +306,8 @@
 <script language="JScript">
 "use strict";
 
-var APP_VERSION = "0.7.0";
+var APP_VERSION = "0.7.1";
+/* v0.7.1 - center-align Processes PID/PPID/CPU-Mem and Timeline Size/UID columns. */
 /* v0.7.0 - UI polish:
    - Processes table gains a Name column; a collapsible process-TREE view (toggle).
    - Logons: clickable links to the raw source log, plus User / Source / Result filters.
@@ -2790,10 +2791,10 @@ var PCOLS=[
   {h:"Score / tags", sk:function(r){return r.score;}, cell:function(r){return scoreCell(r);}},
   {h:"Name", sk:function(r){return lc(procBase(r));}, cell:function(r){return '<td class="mono" title="'+esc(r.exe||r.cmd)+'">'+esc(trunc(procBase(r),24))+'</td>';}},
   {h:"User", sk:function(r){return lc(r.user);}, cell:function(r){return '<td class="mono">'+esc(r.user)+'</td>';}},
-  {h:"PID", sk:function(r){return parseInt(r.pid,10)||0;}, cell:function(r){return '<td class="mono" style="text-align:right">'+esc(r.pid)+(r.hidden?' <span class="tag ioc">hidden</span>':'')+'</td>';}},
-  {h:"PPID", sk:function(r){return parseInt(r.ppid,10)||0;}, cell:function(r){return '<td class="mono" style="text-align:right">'+esc(r.ppid)+'</td>';}},
+  {h:"PID", sk:function(r){return parseInt(r.pid,10)||0;}, cell:function(r){return '<td class="mono" style="text-align:center">'+esc(r.pid)+(r.hidden?' <span class="tag ioc">hidden</span>':'')+'</td>';}},
+  {h:"PPID", sk:function(r){return parseInt(r.ppid,10)||0;}, cell:function(r){return '<td class="mono" style="text-align:center">'+esc(r.ppid)+'</td>';}},
   {h:"Start", sk:function(r){return lc(r.start);}, cell:function(r){return '<td class="mono muted">'+esc(r.start)+'</td>';}},
-  {h:"CPU/Mem %", sk:function(r){return r.cpu!=null?r.cpu:-1;}, cell:function(r){return '<td class="mono" style="text-align:right">'+(r.cpu>=0?(r.cpu.toFixed(1)+' / '+r.mem.toFixed(1)):'<span class="muted">-</span>')+'</td>';}},
+  {h:"CPU/Mem %", sk:function(r){return r.cpu!=null?r.cpu:-1;}, cell:function(r){return '<td class="mono" style="text-align:center">'+(r.cpu>=0?(r.cpu.toFixed(1)+' / '+r.mem.toFixed(1)):'<span class="muted">-</span>')+'</td>';}},
   {h:"Command", sk:function(r){return lc(r.cmd);}, cell:function(r){return '<td class="mono" title="'+esc(r.cmd)+'">'+esc(trunc(r.cmd,140))+'</td>';}}
 ];
 /* when a dataset is empty because the collection profile didn't gather it, say so instead of
@@ -2924,9 +2925,9 @@ var TCOLS=[
   {h:"Score / tags", sk:function(r){return r.score;}, cell:function(r){return scoreCell(r);}},
   {h:"mtime (UTC)", sk:function(r){return r.mtime;}, cell:function(r){return '<td class="mono">'+esc(epochShort(r.mtime))+'</td>';}},
   {h:"ctime (UTC)", sk:function(r){return r.ctime;}, cell:function(r){return '<td class="mono muted">'+esc(epochShort(r.ctime))+'</td>';}},
-  {h:"Size", sk:function(r){return r.size;}, cell:function(r){return '<td class="mono" style="text-align:right">'+esc(fmtSize(r.size))+'</td>';}},
+  {h:"Size", sk:function(r){return r.size;}, cell:function(r){return '<td class="mono" style="text-align:center">'+esc(fmtSize(r.size))+'</td>';}},
   {h:"Mode", sk:function(r){return r.mode;}, cell:function(r){return '<td class="mono">'+esc(r.mode)+'</td>';}},
-  {h:"UID", sk:function(r){return parseInt(r.uid,10)||0;}, cell:function(r){return '<td class="mono" style="text-align:right">'+esc(r.uid)+'</td>';}},
+  {h:"UID", sk:function(r){return parseInt(r.uid,10)||0;}, cell:function(r){return '<td class="mono" style="text-align:center">'+esc(r.uid)+'</td>';}},
   {h:"Path", sk:function(r){return lc(r.path);}, cell:function(r){return '<td class="mono" title="'+esc(r.path)+'">'+esc(trunc(r.path,150))+'</td>';}}
 ];
 function renderTime(){ var rows=[]; for(var i=0;i<TIMEL.length;i++) if(passQ(TIMEL[i])) rows.push(TIMEL[i]);
