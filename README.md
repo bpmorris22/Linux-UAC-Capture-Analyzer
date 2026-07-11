@@ -25,18 +25,21 @@ UAC is excellent at *collecting* a Unix-like host. This tool is about *reading t
 
 ## What it shows
 
-Eight tabs:
+Nine tabs:
 
 | Tab | Built from | Highlights |
 |---|---|---|
 | **Overview** | `uac.log`, `uptime`, `date` | Run metadata incl. **boot time / uptime**, per-dataset stat cards, cross-dataset **Top findings**, scored **Persistence & system findings** (cron, systemd units **and timers**, accounts, suid/caps/hidden sweeps, **null-passphrase SSH keys**, shell histories), package activity (with attribution), **deep-inspected containers** (privileged / sensitive mounts / docker diff), integrity/journal-gap summaries, and a presence inventory |
-| **Processes** | `ps -ef` + `/proc` maps + **`top`** + **per-PID /proc** | Hidden-from-ps processes **synthesized** into rows; deleted-binary detection; **%CPU/%MEM column**; processes **only top saw** (transient/miner); **LD_PRELOAD / memfd / deleted-fd / comm-masquerade** from per-PID environ/fd/maps |
-| **Network** | `ss` / `netstat` + **`/proc/net`** | External connections; socket→process links; **hidden-socket cross-check** (in /proc/net but missing from ss); ownership **recovered on non-root captures** via uid + fd inodes |
+| **Processes** | `ps -ef` + `/proc` + **`top`** + **`lsof`** + **tree** | Hidden-from-ps processes **synthesized**; deleted-binary detection; **%CPU/%MEM**; processes **only top saw**; **LD_PRELOAD / memfd / deleted-fd / comm-masquerade**; **ancestry + children** in detail; **web-shell** detection (interpreter parented by a web/DB server) |
+| **Network** | `ss` / `netstat` + **`/proc/net`** + `lsof` | External connections; socket-to-process links; **hidden-socket cross-check** (in /proc/net but missing from ss); ownership **recovered on non-root captures** via uid + fd inodes |
 | **Logons** | `auth.log` (**ISO-8601 + classic syslog**), **wtmp/btmp/lastlog binaries**, `last`, `lastb` | SSH accepted/failed, **sudo / pkexec / pam sessions / account changes / su**, per-account lastlog, spray + **BRUTEWIN** detection, service-account-login and new-login-account flags |
 | **Timeline** | TSK bodyfile | Full filesystem MAC-times; case-window filterable; capped for MFT-scale captures |
-| **Logs** | journal, syslog, kern.log, sysstat, cloud-init, `journalctl` | **Journal coverage + gap/generation-change detection**, a **boots table** (`journalctl --list-boots`, with between-boot gap checks), **log-integrity** checks, **syslog service inventory**, notable events (OOM, promiscuous, USB, kernel taint, timers/units), **sar** CPU summary, **cloud-init** provisioning baseline |
+| **Events** | **all time-stamped datasets** | One time-sorted, scored, case-window-filterable axis merging logons, package activity, boots, journal gaps & content, audit/AppArmor and timestamped history — the "what happened around \<time\>" view |
+| **Logs** | journal, syslog, kern.log, sysstat, cloud-init, `journalctl`, auditd | **Journal coverage + gap/generation-change detection**, **boots table** (`journalctl --list-boots`), optional **journal contents via WSL** (`journalctl -o json`), **log-integrity** checks, **syslog service inventory**, notable events (OOM, promiscuous, USB, taint, timers/units, **AppArmor/SELinux denials**), **sar** CPU summary, **cloud-init** baseline |
 | **IOC hits** | tree sweep + `hash_executables` | Line-scan of the whole tree, **plus** SHA1 matches against on-disk (dormant) executables |
-| **Inventory** | ~50 key artifacts | Present/absent map across nine categories, each with an "open folder" link to the raw file |
+| **Inventory** | ~55 key artifacts | Present/absent map across categories, each with an "open folder" link to the raw file |
+
+Every finding is tagged with its **MITRE ATT&CK technique** (shown in the detail pane), and the Overview lists the distinct techniques observed. **Config drift** — risky `sshd_config` directives and `pam.d` weaknesses (nullok, `pam_exec`, always-succeed `pam_permit`) — scores into the persistence findings.
 
 Rotated **`.gz` logs** under `[root]/var/log` are inflated at parse time, so weeks of rotated auth/syslog/dpkg/apt history are included automatically — usually where a logs-only capture's real activity lives.
 
