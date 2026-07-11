@@ -306,7 +306,9 @@
 <script language="JScript">
 "use strict";
 
-var APP_VERSION = "0.7.1";
+var APP_VERSION = "0.7.2";
+/* v0.7.2 - freeze headers on the Overview sub-tables too (Recent package installs,
+   Persistence findings, Containers, Persistence & config inventory). */
 /* v0.7.1 - center-align Processes PID/PPID/CPU-Mem and Timeline Size/UID columns. */
 /* v0.7.0 - UI polish:
    - Processes table gains a Name column; a collapsible process-TREE view (toggle).
@@ -2697,7 +2699,7 @@ function renderOverview(){
       +'<td'+(clickable?(' class="lnk" data-pf="'+i+'" style="cursor:pointer" title="View file contents in the detail pane"'):'')+'>'+esc(it.label)+'</td>'
       +'<td>'+pres+'</td><td class="mono">'+esc(sz)+'</td><td class="mono muted">'+esc(it.rel)+'</td><td class="mono">'+open+'</td></tr>';
   }
-  ph+="</tbody>"; $("pTbl").innerHTML=ph; setupColResizeFor($("pTbl"),"ov_persist");
+  ph+="</tbody>"; $("pTbl").innerHTML=ph; setupColResizeFor($("pTbl"),"ov_persist"); freezeById("pTbl");
 }
 function scClass(s){ return s>=5?"sc5":(s>=3?"sc3":(s>=1?"sc1":"sc0")); }
 
@@ -2718,7 +2720,7 @@ function renderPersFind(){
       +'<td class="mono muted">'+esc(r.detail)+'</td>'
       +'<td class="mono" title="'+esc(r.cmd)+'">'+esc(trunc(r.cmd,110))+'</td></tr>'; }
   if(hidden>0) h+='<tr><td colspan="5" class="muted">'+nf(hidden)+' benign persistence command line(s) parsed and scored 0 (not shown)</td></tr>';
-  h+="</tbody>"; $("pfTbl").innerHTML=h; setupColResizeFor($("pfTbl"),"ov_persfind");
+  h+="</tbody>"; $("pfTbl").innerHTML=h; setupColResizeFor($("pfTbl"),"ov_persfind"); freezeById("pfTbl");
 }
 function renderPackages(){
   showEl("pkgWrap", PKGS.length>0);
@@ -2734,7 +2736,7 @@ function renderPackages(){
       +'<td class="mono muted">'+esc(p.action)+'</td>'
       +'<td class="mono">'+esc(p.pkg)+(p.susp?' <span class="tag sus" title="offensive/dual-use tooling">SUS</span>':'')+(isIoc?' <span class="tag ioc">IOC</span>':'')+'</td>'
       +'<td class="mono muted" title="'+esc(p.by)+'">'+esc(trunc(p.by||"-",22))+'</td></tr>'; }
-  h+="</tbody>"; $("pkgTbl").innerHTML=h; setupColResizeFor($("pkgTbl"),"ov_pkg");
+  h+="</tbody>"; $("pkgTbl").innerHTML=h; setupColResizeFor($("pkgTbl"),"ov_pkg"); freezeById("pkgTbl");
 }
 function renderContainers(){
   showEl("ctrWrap", CONTAINERS.length>0);
@@ -2744,7 +2746,7 @@ function renderContainers(){
     h+='<tr'+(rc?(' class="'+rc+'"'):'')+'><td class="mono'+(rc?' first':'')+'">'+esc(c.engine)+tagsHtml(c)+'</td>'
       +'<td class="mono" title="'+esc(c.image)+'">'+esc(trunc(c.image,28))+'</td><td class="mono muted" title="'+esc(c.cmd)+'">'+esc(trunc(c.cmd,26))+'</td>'
       +'<td class="mono muted">'+esc(trunc(c.status,20))+'</td><td class="mono">'+esc(c.names)+'</td></tr>'; }
-  h+="</tbody>"; $("ctrTbl").innerHTML=h; setupColResizeFor($("ctrTbl"),"ov_ctr");
+  h+="</tbody>"; $("ctrTbl").innerHTML=h; setupColResizeFor($("ctrTbl"),"ov_ctr"); freezeById("ctrTbl");
 }
 
 /* ---------- shared table rendering ---------- */
@@ -3273,6 +3275,9 @@ function bindFreeze(sc, tbl){ if(!sc||!tbl) return; sc.onscroll=function(){ free
 function bindFreezeAll(container){ if(!container) return; var divs=container.getElementsByTagName("div");
   for(var i=0;i<divs.length;i++){ if(/\bscroll\b/.test(divs[i].className+"")){ var tb=divs[i].getElementsByTagName("table");
     if(tb.length) bindFreeze(divs[i], tb[0]); } } }
+/* freeze a table by id, walking up to its nearest scrollable (.scroll) ancestor */
+function freezeById(id){ var tb=$(id); if(!tb) return; var n=tb.parentNode;
+  while(n && n.className!==undefined){ if(/\bscroll\b/.test(n.className+"")){ bindFreeze(n, tb); return; } n=n.parentNode; } }
 
 /* ---------- export / copy ---------- */
 function cq(v){ v=(v==null)?"":String(v); return /[",\r\n]/.test(v)?('"'+v.replace(/"/g,'""')+'"'):v; }
