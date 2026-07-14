@@ -325,7 +325,14 @@
 <script language="JScript">
 "use strict";
 
-var APP_VERSION = "0.9.3";
+var APP_VERSION = "0.9.4";
+/* v0.9.4 - SQLECmd wrapper: offer to DOWNLOAD instead of hunt for it (operator request):
+   - if the wrapper isn't found anywhere, a hand-off now offers to download the latest
+     SQLECmd-Wrapper.hta from GitHub into THIS app's folder (browse stays as the offline
+     fallback). The PS downloader resolves the latest release + .hta asset live over TLS 1.2.
+   - if the located wrapper is OLDER than the latest release (quiet once-per-session GitHub
+     check), the hand-off offers to fetch the newer one first; Cancel uses the copy on disk.
+   - Browser-databases hint shows the resolved wrapper's version + latest/newer-available. */
 /* v0.9.3 - SQLECmd wrapper location UX (field finding: clicking the hand-off opened a bare,
    unexplained "Choose File to Upload" dialog in an unrelated last-used folder):
    - resolveSqleWrapper now AUTO-DISCOVERS the wrapper in sibling tool folders (family layout:
@@ -2940,9 +2947,16 @@ function scClass(s){ return s>=5?"sc5":(s>=3?"sc3":(s>=1?"sc1":"sc0")); }
 
 /* ---------- v0.8: Browser databases section (Overview) + SQLECmd wrapper launch ---------- */
 function renderBrowserDbs(){
+  checkSqleLatest();   // v0.9.4: quiet once-per-session freshness check (enables the "newer available" offer)
   var w=resolveSqleWrapper();
-  $("bdbHint").innerHTML = w ? ("wrapper: "+esc(w))
-    : "SQLECmd-Wrapper.hta not located (checked this app's folder + siblings) - the first hand-off explains, then asks you to browse to it once.";
+  if(w){ var wv=sqleWrapperVersion(w);
+    var fresh = (SQLE_LATEST && wv && selfVerNewer(SQLE_LATEST, wv))
+      ? ' &middot; <span class="err">v'+esc(SQLE_LATEST)+' available - a hand-off offers to update</span>'
+      : (SQLE_LATEST && wv ? ' &middot; <span class="ok">latest</span>' : '');
+    $("bdbHint").innerHTML = "wrapper: "+esc(w)+(wv?(" (v"+esc(wv)+")"):"")+fresh;
+  } else {
+    $("bdbHint").innerHTML = "SQLECmd-Wrapper.hta not located (checked this app's folder + siblings) - a hand-off offers to download the latest into this app's folder.";
+  }
   var h="<thead><tr><th>Browser</th><th>User</th><th>Database</th><th>Size</th><th>WAL</th><th>Analyze</th><th>Raw file</th></tr></thead><tbody>";
   for(var i=0;i<BROWSERDBS.length;i++){ var r=BROWSERDBS[i];
     var wal = r.wal ? '<span class="pgood">present</span>'
@@ -2959,7 +2973,33 @@ function renderBrowserDbs(){
 }
 /* wrapper resolution: same folder as this .hta first, else the remembered one-time pick */
 var SQLE_HTA="SQLECmd-Wrapper.hta";
+var SQLE_REPO="bpmorris22/SQLECmd-Wrapper";     // v0.9.4: on-demand download of the family SQLECmd wrapper
+var SQLE_LATEST="", SQLE_LATEST_URL="", SQLE_CHECK_STARTED=false;
 function sqleSidecarFile(){ var d=htaFolder(); return d?(d+"\\UAC-Triage-Tool.sqlecmd.txt"):""; }
+/* read a wrapper .hta's own APP_VERSION so we can tell "have it" from "have an OLDER one" */
+function sqleWrapperVersion(path){
+  try{ if(!path||!fileExists(path)) return ""; var t=readUtf8(path);
+    var m=t.match(/APP_VERSION\s*=\s*["']([0-9.]+)["']/); return m?m[1]:""; }catch(e){ return ""; }
+}
+/* quiet, once-per-session GitHub check for the latest wrapper release (mirrors this app's own
+   checkSelfUpdate) - only used to DECIDE whether to offer an update; the download re-resolves live */
+function checkSqleLatest(){
+  if(SQLE_CHECK_STARTED) return; SQLE_CHECK_STARTED=true;
+  try{
+    var x=new ActiveXObject("MSXML2.XMLHTTP.6.0");
+    x.open("GET","https://api.github.com/repos/"+SQLE_REPO+"/releases/latest",true);
+    try{ x.setRequestHeader("User-Agent","UAC-Triage-Tool"); }catch(eh){}
+    x.onreadystatechange=function(){ if(x.readyState!==4) return;
+      try{ if(x.status!==200) return; var t=x.responseText+"";
+        var m=t.match(/"tag_name"\s*:\s*"v?([0-9.]+)"/i); if(m) SQLE_LATEST=m[1];
+        var re=/"browser_download_url"\s*:\s*"([^"]+\.hta)"/ig, mm, url="";
+        while((mm=re.exec(t))){ if(mm[1].toLowerCase().indexOf("sqlecmd-wrapper")>=0){ url=mm[1]; break; } if(!url) url=mm[1]; }
+        SQLE_LATEST_URL=url;
+        try{ if(BROWSERDBS.length) renderBrowserDbs(); }catch(e){}   // refresh the hint with freshness info
+      }catch(e){} };
+    x.send();
+  }catch(e){}
+}
 var SQLE_WRAPPER_CACHED=null;         // "" = resolved to none; null = not resolved yet (avoids re-probing disk on every Overview render/keystroke)
 function resolveSqleWrapper(force){
   if(!force && SQLE_WRAPPER_CACHED!==null) return SQLE_WRAPPER_CACHED;
@@ -2985,16 +3025,30 @@ function sqleOutDir(){ return LASTOUTDIR ? (parentDir(LASTOUTDIR)+"\\SQLECmd") :
 function sendToSqlecmd(i){
   if(!BROWSERDBS.length) return;
   var w=resolveSqleWrapper();
-  if(!w){ BDB_PENDING=i;
-    // v0.9.3: explain BEFORE the picker opens - a bare "Choose File to Upload" dialog with no
-    // context (and an unrelated last-used folder) is what the operator actually saw in the field.
-    if(!confirm("SQLECmd-Wrapper.hta was not found next to this app or in a sibling tool folder.\n\n"
-      +"Click OK, then browse to your SQLECmd-Wrapper.hta - ONE TIME ONLY; the location is remembered in UAC-Triage-Tool.sqlecmd.txt next to this app.\n\n"
-      +"Don't have it? github.com/bpmorris22/SQLECmd-Wrapper (Releases).")){
+  var appDir=htaFolder();
+  if(!w){
+    // v0.9.4: not found anywhere - OFFER TO DOWNLOAD the latest wrapper into this app's folder
+    // (was: an unexplained file-browse dialog). Browse stays as the offline fallback.
+    var vtxt=SQLE_LATEST?(" (v"+SQLE_LATEST+")"):"";
+    if(appDir && confirm("SQLECmd-Wrapper.hta wasn't found next to this app or in a sibling tool folder.\n\n"
+      +"Download the latest SQLECmd-Wrapper"+vtxt+" from GitHub into this app's folder now?\n"+appDir+"\n\n"
+      +"OK = download & run it.   Cancel = browse to an existing copy instead.")){
+      downloadSqleWrapper(i); return; }
+    // Cancel (or no app folder): fall back to the one-time manual pick
+    BDB_PENDING=i;
+    if(!confirm("Browse to an existing SQLECmd-Wrapper.hta?\n\nOK opens a file picker (remembered in UAC-Triage-Tool.sqlecmd.txt); Cancel aborts the hand-off.\n\nDon't have it? github.com/bpmorris22/SQLECmd-Wrapper (Releases).")){
       BDB_PENDING=null; setStatus("SQLECmd hand-off cancelled - wrapper not located.","muted"); return; }
     setStatus("Browse to SQLECmd-Wrapper.hta - the location is remembered after this one pick.","muted");
     try{ $("sqlePick").click(); }catch(e){ setStatus("Could not open the file picker: "+e.message,"err"); }
     return; }
+  // v0.9.4: found, but is it OLDER than the latest release? Offer to refresh into this app's folder.
+  var wv=sqleWrapperVersion(w);
+  if(appDir && SQLE_LATEST && wv && selfVerNewer(SQLE_LATEST, wv)){
+    if(confirm("Your SQLECmd-Wrapper is v"+wv+"; v"+SQLE_LATEST+" is available.\n\n"
+      +"Download the newer version into this app's folder?\n"+appDir+"\n\n"
+      +"OK = download v"+SQLE_LATEST+" & use it.   Cancel = use your v"+wv+".")){
+      downloadSqleWrapper(i); return; }
+  }
   var input=(i<0)?BDB_COMMON:BROWSERDBS[i].path;
   if(!input){ setStatus("Nothing to hand off to SQLECmd","err"); return; }
   var args='"'+input+'"';
@@ -3008,6 +3062,45 @@ function sendToSqlecmd(i){
     setStatus("SQLECmd wrapper launched with "+lbl+" prefilled - review the input there and click Process.","ok");
     appendLog('SQLECmd hand-off: mshta.exe "'+w+'" '+args);
   }catch(e){ setStatus("Could not launch the SQLECmd wrapper: "+e.message,"err"); }
+}
+/* v0.9.4: download the latest SQLECmd-Wrapper.hta into this app's folder, then continue the pending
+   hand-off. The PS script resolves the latest release + its .hta asset live (so this works even if
+   the async freshness check hasn't run), over TLS 1.2, mirroring doSelfUpdate/openInstructions. */
+function downloadSqleWrapper(i){
+  var dest=htaFolder();
+  if(!dest){ setStatus("Can't determine this app's folder to download into - browse to the wrapper instead.","err");
+    BDB_PENDING=i; try{ $("sqlePick").click(); }catch(e){} return; }
+  var destFile=dest+"\\"+SQLE_HTA;
+  setStatus("Downloading the latest SQLECmd-Wrapper.hta from GitHub…","muted");
+  var fso=new ActiveXObject("Scripting.FileSystemObject"), tmp=fso.GetSpecialFolder(2)+"";
+  var ps1=tmp+"\\sqledl_"+uid()+".ps1";
+  var dq=String(destFile).replace(/'/g,"''");
+  var L=["$ErrorActionPreference='Stop'","[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12",
+    "$h=@{ 'User-Agent'='UAC-Triage-Tool' }",
+    "$j=(Invoke-WebRequest -UseBasicParsing -Uri 'https://api.github.com/repos/"+SQLE_REPO+"/releases/latest' -Headers $h).Content | ConvertFrom-Json",
+    "$a=$j.assets | Where-Object { $_.name -like '*.hta' } | Select-Object -First 1",
+    "if(-not $a){ throw 'no .hta asset in the latest release' }",
+    "$dest='"+dq+"'",
+    "$tmp=Join-Path $env:TEMP ('sqle_'+[guid]::NewGuid().ToString('N')+'.hta')",
+    "Invoke-WebRequest -UseBasicParsing -Uri $a.browser_download_url -OutFile $tmp -Headers $h",
+    "if((Get-Item $tmp).Length -lt 2000){ throw 'downloaded file too small' }",
+    "Copy-Item $tmp $dest -Force","Remove-Item $tmp -Force -ErrorAction SilentlyContinue",
+    "Write-Output ('SQLE_DL_OK '+$j.tag_name)"];
+  try{ var f=fso.CreateTextFile(ps1,true); f.Write(L.join("\r\n")); f.Close(); }catch(ew){ setStatus("Download stage failed: "+ew.message,"err"); return; }
+  var r=runBat(['powershell -NoProfile -ExecutionPolicy Bypass -File "'+ps1+'" > "__LOG__" 2>&1']);
+  try{ fso.DeleteFile(ps1); }catch(e0){}
+  var mm=(r.log+"").match(/SQLE_DL_OK\s+v?([0-9.]+)/);
+  if(mm && fileExists(destFile)){
+    SQLE_WRAPPER_CACHED=destFile; SQLE_LATEST=mm[1];
+    appendLog("SQLECmd wrapper downloaded (v"+mm[1]+") -> "+destFile);
+    setStatus("Downloaded SQLECmd-Wrapper v"+mm[1]+" into this app's folder - launching the hand-off…","ok");
+    try{ renderBrowserDbs(); }catch(e2){}
+    var pend=(BDB_PENDING!=null)?BDB_PENDING:i; BDB_PENDING=null;
+    if(pend!=null) sendToSqlecmd(pend);
+  } else {
+    appendLog("--- SQLECmd wrapper download ---\n"+r.log);
+    setStatus("Download failed (offline, or the release moved). Browse to an existing copy, or grab it from github.com/bpmorris22/SQLECmd-Wrapper.","err");
+  }
 }
 
 /* ---------- Overview sub-sections (v0.2) ---------- */
