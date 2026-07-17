@@ -194,22 +194,29 @@
     <div class="card">
       <div class="row" id="tabbar" style="margin-bottom:2px">
         <button class="btn on" id="tabOverview" data-tab="overview">Overview</button>
+        <button class="btn" id="tabInv" data-tab="inv" title="Map of every key artifact: present/absent, size, open-folder links">Inventory</button>
         <button class="btn" id="tabProc" data-tab="proc">Processes</button>
         <button class="btn" id="tabNet" data-tab="net">Network</button>
         <button class="btn" id="tabLogon" data-tab="logon">Logons</button>
         <button class="btn" id="tabUsers" data-tab="users" title="Per-account view: shell, groups, lock state, SSH keys, last login (v0.11)">Users</button>
+        <button class="btn" id="tabPersist" data-tab="persist" title="Scored persistence command lines + the persistence/config file inventory (v0.13)">Persistence</button>
         <button class="btn" id="tabTime" data-tab="time">Timeline</button>
         <button class="btn" id="tabEvents" data-tab="events">Events</button>
         <button class="btn" id="tabWeb" data-tab="web" title="Web-server access logs (apache/nginx/httpd) - initial-access hunting (v0.11)">Web logs</button>
         <button class="btn" id="tabAudit" data-tab="audit" title="auditd execve + login records when audit.log is in the capture (v0.11)">Audit</button>
+        <button class="btn" id="tabApps" data-tab="apps" title="Recent package installs + containers (v0.13)">Apps</button>
+        <button class="btn" id="tabBrowser" data-tab="browser" title="Browser SQLite databases + the SQLECmd hand-off (v0.13)">Browser</button>
         <button class="btn" id="tabLogs" data-tab="logs">Logs</button>
         <button class="btn" id="tabIoc" data-tab="ioc">IOC hits</button>
-        <button class="btn" id="tabInv" data-tab="inv">Inventory</button>
       </div>
     </div>
 
     <!-- OVERVIEW -->
     <div class="card" id="ovCard">
+      <button class="btn primary" id="reportBtn" style="float:right" title="Write a self-contained HTML report of everything parsed (all tabs, navigation pane, scored tables capped at the highest-signal rows) into the output folder and open it.">Generate report</button>
+      <!-- v0.13: sar CPU summary surfaced here (was buried on the Logs tab) - a sustained-CPU
+           cryptominer tell should be visible the moment the capture opens -->
+      <div id="ovSar"></div>
       <h3>Capture overview</h3>
       <div class="cards3">
         <div class="col3">
@@ -225,38 +232,51 @@
           <div id="ovTop" class="kvgrid"></div>
         </div>
       </div>
-      <div id="persFindWrap" class="hide">
-        <h3 style="margin-top:14px">Persistence &amp; system findings <span class="muted" style="font-weight:400;text-transform:none">- cron / systemd units &amp; timers / authorized_keys / rc.local / ld.so.preload / accounts / suid &amp; capability sweeps / null-passphrase SSH keys / shell histories &amp; startup files / motd &amp; apt hooks / modprobe / XDG autostart / PAM modules, scored</span></h3>
-        <div class="scroll" style="max-height:26vh"><table id="pfTbl"></table></div>
-      </div>
       <!-- v0.11: where did the attacker go NEXT - outbound ssh evidence -->
       <div id="latWrap" class="hide">
         <h3 style="margin-top:14px">Lateral movement <span class="muted" style="font-weight:400;text-transform:none">- outbound SSH evidence: known_hosts destinations, ~/.ssh/config, ssh/scp/rsync commands in shell histories. CORROB = destination appears in known_hosts AND a typed command.</span></h3>
         <div class="scroll" style="max-height:24vh"><table id="latTbl"></table></div>
       </div>
-      <!-- v0.9.2: moved up from the bottom of the Overview - it's actionable, and below the
-           persistence inventory it sat below the fold and got missed on a real full capture -->
+    </div>
+
+    <!-- PERSISTENCE (v0.13: own tab - was two sections on the Overview) -->
+    <div class="card hide" id="persistCard">
+      <div id="persFindWrap" class="hide">
+        <h3>Persistence &amp; system findings <span class="muted" style="font-weight:400;text-transform:none">- cron / systemd units &amp; timers / authorized_keys / rc.local / ld.so.preload / accounts / suid &amp; capability sweeps / null-passphrase SSH keys / shell histories &amp; startup files / motd &amp; apt hooks / modprobe / XDG autostart / PAM modules, scored</span></h3>
+        <div class="scroll" style="max-height:40vh"><table id="pfTbl"></table></div>
+      </div>
+      <div id="persNone" class="ok hide" style="font-size:12px;margin-bottom:8px">No persistence command lines scored &ge; 1 in this capture (benign entries are parsed but hidden - the count shows in the inventory below).</div>
+      <h3 style="margin-top:14px">Persistence &amp; config inventory <span class="muted" style="font-weight:400;text-transform:none">- click a present file to view its contents</span></h3>
+      <div class="scroll" style="max-height:40vh"><table id="pTbl" class="pgrid"></table></div>
+    </div>
+
+    <!-- APPS (v0.13: own tab - was two half-width sections on the Overview) -->
+    <div class="card hide" id="appsCard">
+      <div class="cards3">
+        <div class="col3" id="pkgWrap" style="width:49%">
+          <h3>Recent package installs <span class="muted" style="font-weight:400;text-transform:none" id="pkgWinLbl"></span></h3>
+          <div class="scroll" style="max-height:64vh"><table id="pkgTbl"></table></div>
+        </div>
+        <div class="col3" id="ctrWrap" style="width:49%">
+          <h3>Containers</h3>
+          <div class="scroll" style="max-height:64vh"><table id="ctrTbl"></table></div>
+        </div>
+      </div>
+      <div id="appsNone" class="muted hide" style="font-size:12px">No package-manager activity logs and no container runtimes in this capture.</div>
+    </div>
+
+    <!-- BROWSER (v0.13: own tab - was a section on the Overview) -->
+    <div class="card hide" id="browserCard">
       <div id="bdbWrap" class="hide">
-        <h3 style="margin-top:14px">Browser databases <span class="muted" style="font-weight:400;text-transform:none">- SQLite DBs collected under user profiles; hand off to the SQLECmd wrapper (the Zimmerman maps parse Linux-collected Chrome/Firefox DBs unchanged)</span></h3>
+        <h3>Browser databases <span class="muted" style="font-weight:400;text-transform:none">- SQLite DBs collected under user profiles; hand off to the SQLECmd wrapper (the Zimmerman maps parse Linux-collected Chrome/Firefox DBs unchanged)</span></h3>
         <div class="row" style="margin-bottom:6px">
           <button class="btn primary" id="bdbAllBtn" title="Launch the SQLECmd wrapper with the common parent folder as directory input - it map-matches every database below it in one run. Output lands in _Processed\&lt;host&gt;\SQLECmd beside this app's own output.">Analyze all in SQLECmd &rarr;</button>
           <span class="muted" id="bdbHint" style="font-size:11px;margin-left:8px"></span>
         </div>
-        <div class="scroll" style="max-height:22vh"><table id="bdbTbl"></table></div>
+        <div class="scroll" style="max-height:60vh"><table id="bdbTbl"></table></div>
         <input type="file" id="sqlePick" style="display:none">
       </div>
-      <div class="cards3" style="margin-top:12px">
-        <div class="col3" id="pkgWrap" style="width:49%">
-          <h3>Recent package installs <span class="muted" style="font-weight:400;text-transform:none" id="pkgWinLbl"></span></h3>
-          <div class="scroll" style="max-height:24vh"><table id="pkgTbl"></table></div>
-        </div>
-        <div class="col3" id="ctrWrap" style="width:49%">
-          <h3>Containers</h3>
-          <div class="scroll" style="max-height:24vh"><table id="ctrTbl"></table></div>
-        </div>
-      </div>
-      <h3 style="margin-top:14px">Persistence &amp; config inventory <span class="muted" style="font-weight:400;text-transform:none">- click a present file to view its contents</span></h3>
-      <div class="scroll" style="max-height:30vh"><table id="pTbl" class="pgrid"></table></div>
+      <div id="bdbNone" class="muted hide" style="font-size:12px">No browser SQLite databases under user profiles in this capture. ir_triage captures rarely include them - a full-profile collection lights this up.</div>
     </div>
 
     <!-- EVENTS (v0.6: unified time-sorted scored timeline) -->
@@ -304,6 +324,8 @@
         <input class="txt" id="q" placeholder="search this view (command, address, path, IOC…)" style="width:280px">
         <span id="procTreeWrap" class="hide"><span class="sep"></span>
           <button class="btn" id="procTreeBtn" title="Toggle between the flat process table and a collapsible parent/child tree.">Tree view</button></span>
+        <span id="netFilters" class="hide"><span class="sep"></span>
+          <label style="font-size:12px" title="Show only rows whose REMOTE address is a public (non-RFC1918/loopback/link-local) IP - the outbound/inbound internet traffic."><input type="checkbox" id="netPubOnly"> public IPs only</label></span>
         <span id="logonFilters" class="hide"><span class="sep"></span>
           <select id="logfUser" title="Filter by user"><option value="">user: all</option></select>
           <select id="logfSrc" title="Filter by source artifact"><option value="">source: all</option></select>
@@ -338,7 +360,7 @@
 <script language="JScript">
 "use strict";
 
-var APP_VERSION = "0.12.0";
+var APP_VERSION = "0.13.0";
 /* v0.9.4 - SQLECmd wrapper: offer to DOWNLOAD instead of hunt for it (operator request):
    - if the wrapper isn't found anywhere, a hand-off now offers to download the latest
      SQLECmd-Wrapper.hta from GitHub into THIS app's folder (browse stays as the offline
@@ -806,10 +828,23 @@ function saveRunLog(){
   }catch(e){}
 }
 
-/* ---------- fs helpers (family) ---------- */
-function fileExists(p){ try{ return new ActiveXObject("Scripting.FileSystemObject").FileExists(p); }catch(e){ return false; } }
-function fileSize(p){ try{ return new ActiveXObject("Scripting.FileSystemObject").GetFile(p).Size; }catch(e){ return -1; } }
-function folderExists(p){ try{ return new ActiveXObject("Scripting.FileSystemObject").FolderExists(p); }catch(e){ return false; } }
+/* ---------- fs helpers (family) ----------
+   v0.13 perf: a SINGLETON FSO - these helpers run thousands of times per parse and creating a
+   fresh COM object per call was measurable (persistence deep-parse was 10 s on a real capture,
+   dominated by per-file ActiveX churn - see parse_log 2026-07-18). */
+var FSO1=null;
+function fso1(){ if(!FSO1) FSO1=new ActiveXObject("Scripting.FileSystemObject"); return FSO1; }
+function fileExists(p){ try{ return fso1().FileExists(p); }catch(e){ return false; } }
+function fileSize(p){ try{ return fso1().GetFile(p).Size; }catch(e){ return -1; } }
+function folderExists(p){ try{ return fso1().FolderExists(p); }catch(e){ return false; } }
+/* v0.13 perf: read a file we ALREADY hold an FSO File object for (directory sweeps), skipping the
+   per-file ADODB.Stream round-trip. ANSI read: unit/cron/motd/apt files are ASCII in practice;
+   a non-ASCII byte renders as mojibake in a finding without affecting structure. */
+function readTextFast(f, cap){
+  try{ if(f.Size<=0 || f.Size>(cap||1048576)) return "";
+    var ts=f.OpenAsTextStream(1,0), out=ts.ReadAll(); ts.Close(); return out;
+  }catch(e){ return ""; }
+}
 function parentDir(p){ var i=String(p).lastIndexOf("\\"); return i>=0?p.substring(0,i):p; }
 /* create a directory and any missing parents (FSO CreateFolder does not) */
 function ensureDir(p){ try{ var fso=new ActiveXObject("Scripting.FileSystemObject");
@@ -2008,12 +2043,12 @@ function deepParsePersistence(root){
   // /etc/cron.d/*
   var cd=jp(root,"[root]/etc/cron.d");
   if(fso.FolderExists(cd)){ try{ var e=new Enumerator(fso.GetFolder(cd).Files); for(;!e.atEnd();e.moveNext()){
-    var f=e.item(); t=readTextCapped(f.Path+""); if(t) deepParseCronText("/etc/cron.d/"+f.Name, t); } }catch(er){} }
+    var f=e.item(); t=readTextFast(f); if(t) deepParseCronText("/etc/cron.d/"+f.Name, t); } }catch(er){} }
   // per-user crontabs under /var/spool/cron[/crontabs]
   var spoolDirs=["[root]/var/spool/cron/crontabs","[root]/var/spool/cron"];
   for(i=0;i<spoolDirs.length;i++){ var sd=jp(root,spoolDirs[i]);
     if(fso.FolderExists(sd)){ try{ var se=new Enumerator(fso.GetFolder(sd).Files); for(;!se.atEnd();se.moveNext()){
-      var sf=se.item(); t=readTextCapped(sf.Path+""); if(t) deepParseCronText("crontab("+sf.Name+")", t); } }catch(er2){} break; } }
+      var sf=se.item(); t=readTextFast(sf); if(t) deepParseCronText("crontab("+sf.Name+")", t); } }catch(er2){} break; } }
   // systemd units: system + user unit dirs (v0.10: .timer/.socket/.path/.mount too, plus
   // /etc|/usr/lib systemd/user and each user's ~/.config/systemd/user - user units are a
   // persistence spot most triage misses)
@@ -2040,19 +2075,19 @@ function deepParsePersistence(root){
   var md=jp(root,"[root]/etc/update-motd.d");
   if(fso.FolderExists(md)){ try{ var me=new Enumerator(fso.GetFolder(md).Files); for(;!me.atEnd();me.moveNext()){
     var mf=me.item(); if(STOCK_MOTD.test(mf.Name+"")) continue;
-    t=readTextCapped(mf.Path+""); if(!t) continue; var ml=t.split("\n");
+    t=readTextFast(mf); if(!t) continue; var ml=t.split("\n");
     for(i=0;i<ml.length;i++){ var mv=trimStr(ml[i]); if(mv===""||mv.charAt(0)==="#") continue;
       pushPersFind("update-motd.d/"+mf.Name, "non-stock motd script (runs as root at login)", mv); } } }catch(em){} }
   // APT hooks: Pre/Post-Invoke run arbitrary commands as root on every apt operation
   var ad=jp(root,"[root]/etc/apt/apt.conf.d");
   if(fso.FolderExists(ad)){ try{ var ae=new Enumerator(fso.GetFolder(ad).Files); for(;!ae.atEnd();ae.moveNext()){
-    var af=ae.item(); t=readTextCapped(af.Path+""); if(!t) continue; var al=t.split("\n");
+    var af=ae.item(); t=readTextFast(af); if(!t) continue; var al=t.split("\n");
     for(i=0;i<al.length;i++){ var ah=al[i].match(/(Pre-Invoke|Post-Invoke|Post-Invoke-Success|Pre-Install-Pkgs)[^"]*"([^"]{4,})"/i);
       if(ah) pushPersFind("apt.conf.d/"+af.Name, "APT hook "+ah[1]+" (runs as root on apt runs)", ah[2]); } } }catch(ea){} }
   // modprobe.d: `install <mod> <cmd>` runs <cmd> INSTEAD of loading the module (stock disable-stubs skipped)
   var mpd=jp(root,"[root]/etc/modprobe.d");
   if(fso.FolderExists(mpd)){ try{ var pe=new Enumerator(fso.GetFolder(mpd).Files); for(;!pe.atEnd();pe.moveNext()){
-    var pfl=pe.item(); t=readTextCapped(pfl.Path+""); if(!t) continue; var pl2=t.split("\n");
+    var pfl=pe.item(); t=readTextFast(pfl); if(!t) continue; var pl2=t.split("\n");
     for(i=0;i<pl2.length;i++){ var ph2=trimStr(pl2[i]).match(/^install\s+(\S+)\s+(.+)$/);
       if(ph2 && !/^\/bin\/(true|false)\s*$/.test(trimStr(ph2[2]))) pushPersFind("modprobe.d/"+pfl.Name, "modprobe install hook ("+ph2[1]+")", ph2[2]); } } }catch(ep3){} }
   // XDG autostart (system + per-user) - desktop persistence
@@ -2061,7 +2096,7 @@ function deepParsePersistence(root){
   for(var xd=0;xd<xdgDirs.length;xd++){ if(!fso.FolderExists(xdgDirs[xd])) continue;
     try{ var xe=new Enumerator(fso.GetFolder(xdgDirs[xd]).Files); for(;!xe.atEnd();xe.moveNext()){
       var xf=xe.item(); if(!/\.desktop$/i.test(xf.Name+"")) continue;
-      t=readTextCapped(xf.Path+""); if(!t) continue;
+      t=readTextFast(xf); if(!t) continue;
       var xm=t.match(/^\s*Exec\s*=\s*(.+)$/mi);
       if(xm) pushPersFind("autostart/"+xf.Name, "XDG autostart Exec", trimStr(xm[1])); } }catch(ex){} }
   // shell startup files: only lines matching the hostile-history prefilter (stock rc noise skipped)
@@ -2092,7 +2127,7 @@ function scanUnitsAbs(dir, label){
     for(;!e.atEnd();e.moveNext()){ var f=e.item();
       // v0.10: .timer/.socket/.path/.mount are persistence vectors too (was .service only)
       if(!/\.(service|timer|socket|path|mount)$/i.test(f.Name+"")) continue;
-      var t=readTextCapped(f.Path+""); if(t) deepParseSystemdUnit(label+"/"+f.Name, t); }
+      var t=readTextFast(f); if(t) deepParseSystemdUnit(label+"/"+f.Name, t); }   // v0.13 perf: fast read via the File object we already hold
   }catch(er){}
   // one level of subfolders (…/multi-user.target.wants etc. are usually symlinks Windows dropped, so shallow is fine)
 }
@@ -3499,14 +3534,14 @@ function geoBatch(list, off){
 
 /* ---- v0.11 renderers ---- */
 var WCOLS=[
-  {h:"Score / tags", sk:function(r){return r.score;}, cell:function(r){return scoreCell(r);}},
-  {h:"When", sk:function(r){return r.epoch;}, cell:function(r){return '<td class="mono">'+esc(fmtTime(r.epoch,true))+'</td>';}},
-  {h:"Client IP", sk:function(r){return lc(r.ip);}, cell:function(r){return '<td class="mono" title="'+esc(geoTip(r.ip))+'">'+esc(r.ip)+geoTag(r.ip)+'</td>';}},
-  {h:"Method", sk:function(r){return r.method;}, cell:function(r){return '<td class="mono" style="text-align:center">'+esc(r.method)+'</td>';}},
-  {h:"Status", sk:function(r){return parseInt(r.status,10)||0;}, cell:function(r){return '<td class="mono" style="text-align:center">'+esc(r.status)+'</td>';}},
-  {h:"URI", sk:function(r){return lc(r.uri);}, cell:function(r){return '<td class="mono" title="'+esc(r.uri)+'">'+esc(trunc(r.uri,90))+'</td>';}},
-  {h:"User-Agent", sk:function(r){return lc(r.ua);}, cell:function(r){return '<td class="mono muted" title="'+esc(r.ua)+'">'+esc(trunc(r.ua,40))+'</td>';}},
-  {h:"Log", sk:function(r){return r.src;}, cell:function(r){return '<td class="mono muted">'+esc(r.src)+'</td>';}}
+  {h:"Score / tags", tip:"Suspicion score (>=3 is flagged) plus scoring tags - hover a tag for the full reasons", sk:function(r){return r.score;}, cell:function(r){return scoreCell(r);}},
+  {h:"When", tip:"Request time from the access-log line (CLF offset applied - UTC unless host TZ ticked)", sk:function(r){return r.epoch;}, cell:function(r){return '<td class="mono">'+esc(fmtTime(r.epoch,true))+'</td>';}},
+  {h:"Client IP", tip:"Requesting client - geo/ASN chip when enrichment is on", sk:function(r){return lc(r.ip);}, cell:function(r){return '<td class="mono" title="'+esc(geoTip(r.ip))+'">'+esc(r.ip)+geoTag(r.ip)+'</td>';}},
+  {h:"Method", tip:"HTTP method (POST/PUT to script URIs is scored)", sk:function(r){return r.method;}, cell:function(r){return '<td class="mono" style="text-align:center">'+esc(r.method)+'</td>';}},
+  {h:"Status", tip:"HTTP response status", sk:function(r){return parseInt(r.status,10)||0;}, cell:function(r){return '<td class="mono" style="text-align:center">'+esc(r.status)+'</td>';}},
+  {h:"URI", tip:"Requested path+query (traversal / encoded payloads / command params are scored)", sk:function(r){return lc(r.uri);}, cell:function(r){return '<td class="mono" title="'+esc(r.uri)+'">'+esc(trunc(r.uri,90))+'</td>';}},
+  {h:"User-Agent", tip:"Client user-agent (tool UAs like curl/sqlmap/nuclei are scored)", sk:function(r){return lc(r.ua);}, cell:function(r){return '<td class="mono muted" title="'+esc(r.ua)+'">'+esc(trunc(r.ua,40))+'</td>';}},
+  {h:"Log", tip:"Which access-log file the line came from", sk:function(r){return r.src;}, cell:function(r){return '<td class="mono muted">'+esc(r.src)+'</td>';}}
 ];
 function renderWeb(){
   var rows=[]; for(var i=0;i<WEBLOG.length;i++){ var r=WEBLOG[i];
@@ -3520,15 +3555,15 @@ function renderWeb(){
   if(WEBCAP.total>WEBCAP.shown) $("count").innerHTML+=' · <span class="tag sus">capped: '+nf(WEBCAP.shown)+' of '+nf(WEBCAP.total)+' stored</span> narrow /from /to';
 }
 var UCOLS=[
-  {h:"Score / tags", sk:function(r){return r.score;}, cell:function(r){return scoreCell(r);}},
-  {h:"UID", sk:function(r){return r.uid;}, cell:function(r){return '<td class="mono" style="text-align:center">'+r.uid+'</td>';}},
-  {h:"User", sk:function(r){return lc(r.user);}, cell:function(r){return '<td class="mono">'+esc(r.user)+'</td>';}},
-  {h:"Shell", sk:function(r){return lc(r.shell);}, cell:function(r){return '<td class="mono'+(r.interactive?'':' muted')+'">'+esc(r.shell)+'</td>';}},
-  {h:"Groups", sk:function(r){return r.groups.length;}, cell:function(r){var g=r.groups.join(", ");return '<td class="mono muted" title="'+esc(g)+'">'+esc(trunc(g,34))+'</td>';}},
-  {h:"Password", sk:function(r){return r.locked===null?"":(r.locked?"locked":(r.hasPw?"set":"EMPTY"));}, cell:function(r){var v=r.locked===null?"-":(r.locked?"locked":(r.hasPw?"set":'<span class="err">EMPTY</span>'));return '<td class="mono" style="text-align:center">'+v+'</td>';}},
-  {h:"SSH keys", sk:function(r){return r.keys;}, cell:function(r){return '<td class="mono" style="text-align:center">'+(r.keys||"-")+'</td>';}},
-  {h:"History", sk:function(r){return r.hist;}, cell:function(r){return '<td class="mono" style="text-align:center">'+(r.hist?nf(r.hist):"-")+'</td>';}},
-  {h:"Last login", sk:function(r){return r.lastEp;}, cell:function(r){return '<td class="mono">'+(r.lastEp?(esc(fmtTime(r.lastEp,false))+(r.lastIp?(" "+esc(r.lastIp)):"")):"-")+'</td>';}}
+  {h:"Score / tags", tip:"Suspicion score (>=3 is flagged) plus scoring tags - hover a tag for the full reasons", sk:function(r){return r.score;}, cell:function(r){return scoreCell(r);}},
+  {h:"UID", tip:"User id (0 = root; <1000 = system/service; >=1000 = human)", sk:function(r){return r.uid;}, cell:function(r){return '<td class="mono" style="text-align:center">'+r.uid+'</td>';}},
+  {h:"User", tip:"Account name from /etc/passwd", sk:function(r){return lc(r.user);}, cell:function(r){return '<td class="mono">'+esc(r.user)+'</td>';}},
+  {h:"Shell", tip:"Login shell (greyed = nologin/false - non-interactive)", sk:function(r){return lc(r.shell);}, cell:function(r){return '<td class="mono'+(r.interactive?'':' muted')+'">'+esc(r.shell)+'</td>';}},
+  {h:"Groups", tip:"Primary + supplementary groups (docker/sudo membership is scored)", sk:function(r){return r.groups.length;}, cell:function(r){var g=r.groups.join(", ");return '<td class="mono muted" title="'+esc(g)+'">'+esc(trunc(g,34))+'</td>';}},
+  {h:"Password", tip:"shadow state: set / locked / EMPTY (passwordless login); '-' = shadow not collected (non-root capture)", sk:function(r){return r.locked===null?"":(r.locked?"locked":(r.hasPw?"set":"EMPTY"));}, cell:function(r){var v=r.locked===null?"-":(r.locked?"locked":(r.hasPw?"set":'<span class="err">EMPTY</span>'));return '<td class="mono" style="text-align:center">'+v+'</td>';}},
+  {h:"SSH keys", tip:"authorized_keys entry count in this user's ~/.ssh", sk:function(r){return r.keys;}, cell:function(r){return '<td class="mono" style="text-align:center">'+(r.keys||"-")+'</td>';}},
+  {h:"History", tip:"Shell-history line count across bash/zsh/sh/ash histories", sk:function(r){return r.hist;}, cell:function(r){return '<td class="mono" style="text-align:center">'+(r.hist?nf(r.hist):"-")+'</td>';}},
+  {h:"Last login", tip:"Most recent login from the lastlog table (+source IP when remote)", sk:function(r){return r.lastEp;}, cell:function(r){return '<td class="mono">'+(r.lastEp?(esc(fmtTime(r.lastEp,false))+(r.lastIp?(" "+esc(r.lastIp)):"")):"-")+'</td>';}}
 ];
 function renderUsers(){
   var rows=[], inter=0, svc=0;
@@ -3541,12 +3576,12 @@ function renderUsers(){
   $("count").innerHTML+=" · "+nf(inter)+" interactive-shell, "+nf(svc)+" service accounts"+(USERS.length && USERS[0].locked===null?" · shadow not collected (lock state unknown)":"");
 }
 var ACOLS=[
-  {h:"Score / tags", sk:function(r){return r.score;}, cell:function(r){return scoreCell(r);}},
-  {h:"When", sk:function(r){return r.epoch;}, cell:function(r){return '<td class="mono">'+esc(fmtTime(r.epoch,true))+'</td>';}},
-  {h:"Type", sk:function(r){return r.typ;}, cell:function(r){return '<td class="mono muted">'+esc(r.typ)+'</td>';}},
-  {h:"User", sk:function(r){return lc(r.user);}, cell:function(r){return '<td class="mono">'+esc(r.user||"-")+'</td>';}},
-  {h:"Source IP", sk:function(r){return lc(r.ip);}, cell:function(r){return '<td class="mono" title="'+esc(geoTip(r.ip))+'">'+esc(r.ip||"-")+geoTag(r.ip)+'</td>';}},
-  {h:"Detail", sk:function(r){return lc(r.detail);}, cell:function(r){return '<td class="mono" title="'+esc(r.detail)+'">'+esc(trunc(r.detail,110))+'</td>';}}
+  {h:"Score / tags", tip:"Suspicion score (>=3 is flagged) plus scoring tags - hover a tag for the full reasons", sk:function(r){return r.score;}, cell:function(r){return scoreCell(r);}},
+  {h:"When", tip:"auditd record time (kernel epoch - true UTC)", sk:function(r){return r.epoch;}, cell:function(r){return '<td class="mono">'+esc(fmtTime(r.epoch,true))+'</td>';}},
+  {h:"Type", tip:"EXECVE (process execution) or USER_LOGIN/USER_AUTH/USER_CMD (auth events)", sk:function(r){return r.typ;}, cell:function(r){return '<td class="mono muted">'+esc(r.typ)+'</td>';}},
+  {h:"User", tip:"Attributed account (EXECVE: auid via SYSCALL correlation)", sk:function(r){return lc(r.user);}, cell:function(r){return '<td class="mono">'+esc(r.user||"-")+'</td>';}},
+  {h:"Source IP", tip:"addr= field on auth records - geo chip when enrichment is on", sk:function(r){return lc(r.ip);}, cell:function(r){return '<td class="mono" title="'+esc(geoTip(r.ip))+'">'+esc(r.ip||"-")+geoTag(r.ip)+'</td>';}},
+  {h:"Detail", tip:"EXECVE: full argv (hex-encoded args decoded) / auth: event + result + terminal", sk:function(r){return lc(r.detail);}, cell:function(r){return '<td class="mono" title="'+esc(r.detail)+'">'+esc(trunc(r.detail,110))+'</td>';}}
 ];
 function renderAudit(){
   var rows=[]; for(var i=0;i<AUDITX.length;i++){ var r=AUDITX[i];
@@ -3579,21 +3614,24 @@ function buildLogonByIp(){
   return out;
 }
 var LIPCOLS=[
-  {h:"Score / tags", sk:function(r){return r.score;}, cell:function(r){return scoreCell(r);}},
-  {h:"Source IP", sk:function(r){return lc(r.ip);}, cell:function(r){return '<td class="mono">'+esc(r.ip)+geoTag(r.ip)+'</td>';}},
-  {h:"Geo / ASN", sk:function(r){return geoTip(r.ip);}, cell:function(r){return '<td class="mono muted" title="'+esc(geoTip(r.ip))+'">'+esc(trunc(geoTip(r.ip)||"-",36))+'</td>';}},
-  {h:"First seen", sk:function(r){return r.first;}, cell:function(r){return '<td class="mono">'+esc(r.first?fmtTime(r.first,false):"-")+'</td>';}},
-  {h:"Last seen", sk:function(r){return r.last;}, cell:function(r){return '<td class="mono">'+esc(r.last?fmtTime(r.last,false):"-")+'</td>';}},
-  {h:"Failures", sk:function(r){return r.fails;}, cell:function(r){return '<td class="mono" style="text-align:center">'+(r.fails?nf(r.fails):"-")+'</td>';}},
-  {h:"Successes", sk:function(r){return r.okc;}, cell:function(r){var hot=(r.fails>=5&&r.okc>0);return '<td class="mono" style="text-align:center">'+(hot?'<span class="err">':'')+(r.okc?nf(r.okc):"-")+(hot?'</span>':'')+'</td>';}},
-  {h:"Users tried", sk:function(r){return r.userN;}, cell:function(r){return '<td class="mono muted" title="'+esc(r.userList)+'">'+r.userN+(r.userList?(" ("+esc(trunc(r.userList,40))+")"):"")+'</td>';}}
+  {h:"Score / tags", tip:"Suspicion score (>=3 is flagged) plus scoring tags - hover a tag for the full reasons", sk:function(r){return r.score;}, cell:function(r){return scoreCell(r);}},
+  {h:"Source IP", tip:"Aggregated source address across all logon rows", sk:function(r){return lc(r.ip);}, cell:function(r){return '<td class="mono">'+esc(r.ip)+geoTag(r.ip)+'</td>';}},
+  {h:"Geo / ASN", tip:"Country + ASN/org (online geo/ASN enrichment; blank = local IP, lookup off, or pending)", sk:function(r){return geoTip(r.ip);}, cell:function(r){return '<td class="mono muted" title="'+esc(geoTip(r.ip))+'">'+esc(trunc(geoTip(r.ip)||"-",36))+'</td>';}},
+  {h:"First seen", tip:"Earliest logon event from this IP in the capture", sk:function(r){return r.first;}, cell:function(r){return '<td class="mono">'+esc(r.first?fmtTime(r.first,false):"-")+'</td>';}},
+  {h:"Last seen", tip:"Latest logon event from this IP in the capture", sk:function(r){return r.last;}, cell:function(r){return '<td class="mono">'+esc(r.last?fmtTime(r.last,false):"-")+'</td>';}},
+  {h:"Failures", tip:"Failed-auth count from this IP", sk:function(r){return r.fails;}, cell:function(r){return '<td class="mono" style="text-align:center">'+(r.fails?nf(r.fails):"-")+'</td>';}},
+  {h:"Successes", tip:"Accepted logons / sessions from this IP (red = success AFTER brute-force volume)", sk:function(r){return r.okc;}, cell:function(r){var hot=(r.fails>=5&&r.okc>0);return '<td class="mono" style="text-align:center">'+(hot?'<span class="err">':'')+(r.okc?nf(r.okc):"-")+(hot?'</span>':'')+'</td>';}},
+  {h:"Users tried", tip:"Distinct usernames attempted from this IP (many users = spray)", sk:function(r){return r.userN;}, cell:function(r){return '<td class="mono muted" title="'+esc(r.userList)+'">'+r.userN+(r.userList?(" ("+esc(trunc(r.userList,40))+")"):"")+'</td>';}}
 ];
 function renderLateral(){
   showEl("latWrap", LATERAL.length>0);
   if(!LATERAL.length){ $("latTbl").innerHTML=""; return; }
   var rows=LATERAL.slice(0);
   rows.sort(function(a,b){ return (b.score-a.score) || ((b.corrob?1:0)-(a.corrob?1:0)); });
-  var h="<thead><tr><th>Evidence</th><th>User</th><th>Destination</th><th>Detail</th></tr></thead><tbody>";
+  var h='<thead><tr><th title="Evidence source: known_hosts / ssh_config / typed history command (CORROB = seen in both known_hosts and a command)">Evidence</th>'
+    +'<th title="Which user\'s home the evidence came from">User</th>'
+    +'<th title="Outbound destination host/IP - geo chip when enrichment is on">Destination</th>'
+    +'<th title="The raw entry / command line (+timestamp when the history carries one)">Detail</th></tr></thead><tbody>';
   for(var i=0;i<rows.length && i<200;i++){ var L=rows[i]; var rc=rowCls(L);
     h+='<tr'+(rc?(' class="'+rc+'"'):'')+'><td class="mono'+(rc?' first':'')+'">'+esc(L.kind)
       +(L.corrob?' <span class="tag sus" title="destination appears in known_hosts AND a typed ssh/scp command">CORROB</span>':'')+tagsHtml(L)+'</td>'
@@ -3607,21 +3645,28 @@ function renderLateral(){
 /* ---------- tab / render dispatch ---------- */
 function setTab(t, quiet){
   TAB=t;
-  var ids={overview:"tabOverview",proc:"tabProc",net:"tabNet",logon:"tabLogon",users:"tabUsers",time:"tabTime",events:"tabEvents",web:"tabWeb",audit:"tabAudit",logs:"tabLogs",ioc:"tabIoc",inv:"tabInv"};
+  var ids={overview:"tabOverview",inv:"tabInv",proc:"tabProc",net:"tabNet",logon:"tabLogon",users:"tabUsers",persist:"tabPersist",time:"tabTime",events:"tabEvents",web:"tabWeb",audit:"tabAudit",apps:"tabApps",browser:"tabBrowser",logs:"tabLogs",ioc:"tabIoc"};
   for(var k in ids){ if(ids.hasOwnProperty(k)){ $(ids[k]).className=(k===t)?"btn on":"btn"; } }
   var isOv=(t==="overview"), isLogs=(t==="logs"), isEv=(t==="events");
-  showEl("ovCard",isOv); showEl("logsCard",isLogs); showEl("eventsCard",isEv); showEl("tblCard", !isOv && !isLogs && !isEv);
+  var isPersist=(t==="persist"), isApps=(t==="apps"), isBrowser=(t==="browser");
+  showEl("ovCard",isOv); showEl("logsCard",isLogs); showEl("eventsCard",isEv);
+  showEl("persistCard",isPersist); showEl("appsCard",isApps); showEl("browserCard",isBrowser);
+  showEl("tblCard", !isOv && !isLogs && !isEv && !isPersist && !isApps && !isBrowser);
   showEl("dateWrap", t==="time" || t==="logon" || t==="web" || t==="audit");
   showEl("tzWrap", t==="time" || t==="logon" || t==="web" || t==="audit");
   showEl("procTreeWrap", t==="proc");
   showEl("logonFilters", t==="logon");
-  if(!isOv && !isLogs && !isEv){ $("q").value=QUERY; }
+  showEl("netFilters", t==="net");
+  if(!isOv && !isLogs && !isEv && !isPersist && !isApps && !isBrowser){ $("q").value=QUERY; }
   if(!quiet) render();
 }
 function render(){
   if(TAB==="overview"){ renderOverview(); return; }
   if(TAB==="logs"){ renderLogs(); return; }
   if(TAB==="events"){ renderEvents(); return; }
+  if(TAB==="persist"){ renderPersistTab(); return; }
+  if(TAB==="apps"){ renderAppsTab(); return; }
+  if(TAB==="browser"){ renderBrowserTab(); return; }
   if(TAB==="proc") renderProc();
   else if(TAB==="net") renderNet();
   else if(TAB==="logon") renderLogon();
@@ -3675,7 +3720,7 @@ function renderOverview(){
     s+=statCard(nf(LATERAL.length),"lateral evidence",ltf?"flag":""); }
   if(EVENTS.length) s+=statCard(nf(EVENTS.length),"timeline events","");
   if(CONFIGDRIFT.length) s+=statCard(nf(CONFIGDRIFT.length),"config drift",CONFIGDRIFT.length?"warn":"");
-  if(BROWSERDBS.length) s+='<span class="stat" data-jump="bdbWrap" style="cursor:pointer" title="Click to jump to the Browser databases section (SQLECmd hand-off)"><span class="n">'+nf(BROWSERDBS.length)+'</span><span class="l">browser DBs</span></span>';
+  if(BROWSERDBS.length) s+='<span class="stat" data-gotab="browser" style="cursor:pointer" title="Click to open the Browser tab (SQLECmd hand-off)"><span class="n">'+nf(BROWSERDBS.length)+'</span><span class="l">browser DBs</span></span>';
   if(META.failed) s+=statCard(nf(META.failed),"failed cmds","warn");
   $("ovStats").innerHTML=s;
   // ATT&CK coverage: distinct techniques across all flagged rows
@@ -3719,10 +3764,43 @@ function renderOverview(){
   if(!all.length) th='<div class="ok">No rows scored suspicious (score ≥ 3) in this capture.</div>';
   $("ovTop").innerHTML=th;
 
-  renderPersFind(); renderLateral(); renderPackages(); renderContainers();
+  // v0.13: persistence / packages / containers / browser DBs render on their own tabs now
+  renderLateral();
+  $("ovSar").innerHTML=sarSummaryHtml();
+}
+/* v0.13: sar CPU summary - shown at the TOP of the Overview (sustained %usr = cryptominer tell) */
+function sarSummaryHtml(){
+  if(!SARSUM) return "";
+  var S=SARSUM, H=[];
+  H.push('<div style="margin-bottom:10px"><h3>sysstat / sar CPU summary</h3>');
+  H.push('<div>'+statCard(nf(S.days),"sar day-files","")+statCard(nf(S.intervals),"intervals","")
+    +statCard(S.maxUsr.toFixed(0)+"%","peak %usr", S.maxUsr>=80?"warn":"")
+    +statCard(nf(S.busy.length),">=80% usr", S.busy.length?"warn":"")+'</div>');
+  if(S.busy.length){ H.push('<div class="scroll" style="max-height:14vh"><table><thead><tr>'
+    +'<th title="sar day-file date">Date</th><th title="Interval start time (host local)">Time</th>'
+    +'<th title="% CPU in user space - sustained high values with no known workload = cryptominer tell">%usr</th>'
+    +'<th title="% CPU idle during the interval">%idle</th></tr></thead><tbody>');
+    for(var i=0;i<S.busy.length && i<20;i++){ var bz=S.busy[i];
+      H.push('<tr class="row-warn"><td class="mono first">'+esc(bz.date)+'</td><td class="mono">'+esc(bz.time)+'</td><td class="mono" style="text-align:right">'+bz.usr.toFixed(1)+'</td><td class="mono" style="text-align:right">'+bz.idle.toFixed(1)+'</td></tr>'); }
+    H.push('</tbody></table></div>'); }
+  H.push('</div>');
+  return H.join("");
+}
+/* v0.13: Persistence tab (scored findings + config inventory - both moved off the Overview) */
+function renderPersistTab(){
+  renderPersFind();
+  var anyScored=false; for(var s2=0;s2<PERSFIND.length;s2++){ if(PERSFIND[s2].score>=1){ anyScored=true; break; } }
+  showEl("persNone", !anyScored);
+  renderPersistGrid();
+}
+function renderPersistGrid(){
   // persistence grid: click name to view contents; "open" opens the raw file's folder in Explorer
-  var ph="<thead><tr><th>Artifact</th><th>Present</th><th>Size / files</th><th>Path (relative)</th><th>Raw file</th></tr></thead><tbody>";
-  for(i=0;i<PERSIST.length;i++){ var it=PERSIST[i];
+  var ph='<thead><tr><th title="The persistence/config artifact checked for">Artifact</th>'
+    +'<th title="Whether the file/dir exists in this capture (IOC = its content matched an IOC term)">Present</th>'
+    +'<th title="File size, or file count for directories/per-user sets">Size / files</th>'
+    +'<th title="Where it lives in the capture ([root] = the collected filesystem mirror)">Path (relative)</th>'
+    +'<th title="Open the raw collected file in Explorer">Raw file</th></tr></thead><tbody>';
+  for(var i=0;i<PERSIST.length;i++){ var it=PERSIST[i];
     var pres = it.present ? (it.ioc?'<span class="pflag">present, IOC</span>':'<span class="pgood">present</span>') : '<span class="pmiss">absent</span>';
     var sz = it.present ? ((it.dir||it.userfile) ? (nf(it.count)+" file(s)"+(it.userfile&&it.size?(", "+fmtSize(it.size)):"")) : fmtSize(it.size)) : "-";
     var clickable = (it.present && it.path);
@@ -3732,7 +3810,16 @@ function renderOverview(){
       +'<td>'+pres+'</td><td class="mono">'+esc(sz)+'</td><td class="mono muted">'+esc(it.rel)+'</td><td class="mono">'+open+'</td></tr>';
   }
   ph+="</tbody>"; $("pTbl").innerHTML=ph; setupColResizeFor($("pTbl"),"ov_persist"); freezeById("pTbl");
+}
+/* v0.13: Apps tab (package installs + containers - moved off the Overview) */
+function renderAppsTab(){
+  renderPackages(); renderContainers();
+  showEl("appsNone", !PKGS.length && !CONTAINERS.length);
+}
+/* v0.13: Browser tab (browser DBs + SQLECmd hand-off - moved off the Overview) */
+function renderBrowserTab(){
   showEl("bdbWrap", BROWSERDBS.length>0);
+  showEl("bdbNone", !BROWSERDBS.length);
   if(BROWSERDBS.length) renderBrowserDbs();
 }
 function scClass(s){ return s>=5?"sc5":(s>=3?"sc3":(s>=1?"sc1":"sc0")); }
@@ -3749,7 +3836,13 @@ function renderBrowserDbs(){
   } else {
     $("bdbHint").innerHTML = "SQLECmd-Wrapper.hta not located (checked this app's folder + siblings) - a hand-off offers to download the latest into this app's folder.";
   }
-  var h="<thead><tr><th>Browser</th><th>User</th><th>Database</th><th>Size</th><th>WAL</th><th>Analyze</th><th>Raw file</th></tr></thead><tbody>";
+  var h='<thead><tr><th title="Browser the database belongs to (from its path)">Browser</th>'
+    +'<th title="User profile the DB was collected from">User</th>'
+    +'<th title="Database file (History / places.sqlite / cookies / ...)">Database</th>'
+    +'<th title="File size in the capture">Size</th>'
+    +'<th title="-wal sidecar present? Without it the newest visits may be missing if the browser was running at collection">WAL</th>'
+    +'<th title="Send this one database to the SQLECmd wrapper">Analyze</th>'
+    +'<th title="Open the raw collected file in Explorer">Raw file</th></tr></thead><tbody>';
   for(var i=0;i<BROWSERDBS.length;i++){ var r=BROWSERDBS[i];
     var wal = r.wal ? '<span class="pgood">present</span>'
       : '<span class="pmiss" title="No -wal sidecar in the capture. If the browser was running at collection, the newest visits may not be in the main DB yet - recollect including -wal/-shm if recent history matters.">absent</span>';
@@ -3907,7 +4000,11 @@ function renderPersFind(){
   showEl("persFindWrap", rows.length>0);
   if(!rows.length){ $("pfTbl").innerHTML=""; return; }
   rows.sort(function(a,b){ return b.score-a.score; });
-  var h="<thead><tr><th>Score</th><th>When</th><th>Source</th><th>Kind</th><th>Command line</th></tr></thead><tbody>";
+  var h='<thead><tr><th title="Suspicion score - hover the tags for reasons">Score</th>'
+    +'<th title="Timestamp when the source carries one (histories with HISTTIMEFORMAT)">When</th>'
+    +'<th title="Which persistence file/artifact the command line came from">Source</th>'
+    +'<th title="What kind of entry (cron / systemd Exec / authorized_keys / motd / PAM / ...)">Kind</th>'
+    +'<th title="The command line found - hover for full text">Command line</th></tr></thead><tbody>';
   for(i=0;i<rows.length;i++){ var r=rows[i]; var rc=rowCls(r);
     h+='<tr'+(rc?(' class="'+rc+'"'):'')+'><td class="first"><span class="sc '+scClass(r.score)+'">'+r.score+'</span>'+tagsHtml(r)+'</td>'
       +'<td class="mono muted">'+esc(r.epoch?fmtTime(r.epoch,true):"-")+'</td>'
@@ -3925,7 +4022,10 @@ function renderPackages(){
     +(susN?(' <span class="tag sus">'+susN+' suspicious</span>'):'')
     +(manual?(' <span class="tag info">'+manual+' user-requested</span>'):(PKGS.length?' <span class="tag info">all automated</span>':''));
   if(!PKGS.length){ $("pkgTbl").innerHTML=""; return; }
-  var h="<thead><tr><th>When</th><th>Action</th><th>Package</th><th>Requested by</th></tr></thead><tbody>";
+  var h='<thead><tr><th title="Install/change time from apt history / dpkg log (host-local as written)">When</th>'
+    +'<th title="install / upgrade / remove / purge / downgrade">Action</th>'
+    +'<th title="Package name (SUS chip = dual-use tooling watchlist; IOC = matched your IOC list)">Package</th>'
+    +'<th title="Requested-By from apt history - separates a human apt install from unattended upgrades">Requested by</th></tr></thead><tbody>';
   for(var i=0;i<PKGS.length && i<300;i++){ var p=PKGS[i]; var isIoc=iocHit(p.blob); var cls=isIoc?"ioc row-flag":(p.susp?"row-warn":"");
     h+='<tr'+(cls?(' class="'+cls+'"'):'')+'><td class="mono'+((isIoc||p.susp)?' first':'')+'" title="'+esc(p.mgr)+'">'+esc(p.when)+'</td>'
       +'<td class="mono muted">'+esc(p.action)+'</td>'
@@ -3936,7 +4036,11 @@ function renderPackages(){
 function renderContainers(){
   showEl("ctrWrap", CONTAINERS.length>0);
   if(!CONTAINERS.length){ $("ctrTbl").innerHTML=""; return; }
-  var h="<thead><tr><th>Engine</th><th>Image</th><th>Command</th><th>Status</th><th>Name</th></tr></thead><tbody>";
+  var h='<thead><tr><th title="Container runtime (docker / podman / ...) - tags flag privileged / host-ns / sensitive mounts">Engine</th>'
+    +'<th title="Image the container runs">Image</th>'
+    +'<th title="Container entry command">Command</th>'
+    +'<th title="Runtime status at collection">Status</th>'
+    +'<th title="Container name(s)">Name</th></tr></thead><tbody>';
   for(var i=0;i<CONTAINERS.length;i++){ var c=CONTAINERS[i]; var rc=rowCls(c);
     h+='<tr'+(rc?(' class="'+rc+'"'):'')+'><td class="mono'+(rc?' first':'')+'">'+esc(c.engine)+tagsHtml(c)+'</td>'
       +'<td class="mono" title="'+esc(c.image)+'">'+esc(trunc(c.image,28))+'</td><td class="mono muted" title="'+esc(c.cmd)+'">'+esc(trunc(c.cmd,26))+'</td>'
@@ -3962,7 +4066,8 @@ function drawTable(cols, rows, st, tabkey){
   var shown=rows.length>MAXROWS?MAXROWS:rows.length;
   var html="<thead><tr>";
   for(var c=0;c<cols.length;c++){ var arrow=(st.k===c)?(st.d>0?" ▲":" ▼"):"";
-    html+='<th data-k="'+c+'">'+esc(cols[c].h)+arrow+'</th>'; }
+    // v0.13: every heading carries a tooltip (col.tip, falling back to the sort/resize hint)
+    html+='<th data-k="'+c+'" title="'+esc((cols[c].tip?cols[c].tip+" · ":"")+"Click to sort; drag the right edge to resize")+'">'+esc(cols[c].h)+arrow+'</th>'; }
   html+="</tr></thead><tbody>";
   for(var i=0;i<shown;i++){ var r=rows[i]; var rc=rowCls(r);
     html+='<tr data-i="'+i+'"'+(rc?(' class="'+rc+'"'):'')+' style="cursor:pointer">';
@@ -3985,14 +4090,14 @@ function drawTable(cols, rows, st, tabkey){
 /* processes table */
 function procBase(r){ var t=firstToken(r.exe||r.cmd||""); var b=t.substring(t.lastIndexOf("/")+1); b=b.replace(/^[\[(]|[\])]$/g,""); return b||t; }
 var PCOLS=[
-  {h:"Score / tags", sk:function(r){return r.score;}, cell:function(r){return scoreCell(r);}},
-  {h:"Name", sk:function(r){return lc(procBase(r));}, cell:function(r){return '<td class="mono" title="'+esc(r.exe||r.cmd)+'">'+esc(trunc(procBase(r),24))+'</td>';}},
-  {h:"User", sk:function(r){return lc(r.user);}, cell:function(r){return '<td class="mono">'+esc(r.user)+'</td>';}},
-  {h:"PID", sk:function(r){return parseInt(r.pid,10)||0;}, cell:function(r){return '<td class="mono" style="text-align:center">'+esc(r.pid)+(r.hidden?' <span class="tag ioc">hidden</span>':'')+'</td>';}},
-  {h:"PPID", sk:function(r){return parseInt(r.ppid,10)||0;}, cell:function(r){return '<td class="mono" style="text-align:center">'+esc(r.ppid)+'</td>';}},
-  {h:"Start", sk:function(r){return lc(r.start);}, cell:function(r){return '<td class="mono muted">'+esc(r.start)+'</td>';}},
-  {h:"CPU/Mem %", sk:function(r){return r.cpu!=null?r.cpu:-1;}, cell:function(r){return '<td class="mono" style="text-align:center">'+(r.cpu>=0?(r.cpu.toFixed(1)+' / '+r.mem.toFixed(1)):'<span class="muted">-</span>')+'</td>';}},
-  {h:"Command", sk:function(r){return lc(r.cmd);}, cell:function(r){return '<td class="mono" title="'+esc(r.cmd)+'">'+esc(trunc(r.cmd,140))+'</td>';}}
+  {h:"Score / tags", tip:"Suspicion score (>=3 is flagged) plus scoring tags - hover a tag for the full reasons", sk:function(r){return r.score;}, cell:function(r){return scoreCell(r);}},
+  {h:"Name", tip:"Process basename (from exe path or first command token)", sk:function(r){return lc(procBase(r));}, cell:function(r){return '<td class="mono" title="'+esc(r.exe||r.cmd)+'">'+esc(trunc(procBase(r),24))+'</td>';}},
+  {h:"User", tip:"Account the process runs as", sk:function(r){return lc(r.user);}, cell:function(r){return '<td class="mono">'+esc(r.user)+'</td>';}},
+  {h:"PID", tip:"Process id ('hidden' = present in /proc but missing from ps)", sk:function(r){return parseInt(r.pid,10)||0;}, cell:function(r){return '<td class="mono" style="text-align:center">'+esc(r.pid)+(r.hidden?' <span class="tag ioc">hidden</span>':'')+'</td>';}},
+  {h:"PPID", tip:"Parent process id - the detail pane shows full ancestry", sk:function(r){return parseInt(r.ppid,10)||0;}, cell:function(r){return '<td class="mono" style="text-align:center">'+esc(r.ppid)+'</td>';}},
+  {h:"Start", tip:"Start time/date column as ps reported it (host-local)", sk:function(r){return lc(r.start);}, cell:function(r){return '<td class="mono muted">'+esc(r.start)+'</td>';}},
+  {h:"CPU/Mem %", tip:"%CPU / %MEM at collection instant (from top -b -n1; '-' = not seen by top)", sk:function(r){return r.cpu!=null?r.cpu:-1;}, cell:function(r){return '<td class="mono" style="text-align:center">'+(r.cpu>=0?(r.cpu.toFixed(1)+' / '+r.mem.toFixed(1)):'<span class="muted">-</span>')+'</td>';}},
+  {h:"Command", tip:"Full command line as collected", sk:function(r){return lc(r.cmd);}, cell:function(r){return '<td class="mono" title="'+esc(r.cmd)+'">'+esc(trunc(r.cmd,140))+'</td>';}}
 ];
 /* when a dataset is empty because the collection profile didn't gather it, say so instead of
    showing a blank grid (a logs-only capture legitimately has no processes/network/timeline). */
@@ -4049,15 +4154,23 @@ function treeNode(pid, depth, show, shown){
 
 /* network table */
 var NCOLS=[
-  {h:"Score / tags", sk:function(r){return r.score;}, cell:function(r){return scoreCell(r);}},
-  {h:"Proto", sk:function(r){return r.proto;}, cell:function(r){return '<td class="mono">'+esc(r.proto)+'</td>';}},
-  {h:"State", sk:function(r){return r.state;}, cell:function(r){return '<td class="mono">'+esc(r.state)+'</td>';}},
-  {h:"Local", sk:function(r){return lc(r.local);}, cell:function(r){return '<td class="mono" title="'+esc(r.local)+'">'+esc(r.local)+'</td>';}},
-  {h:"Remote", sk:function(r){return lc(r.peer);}, cell:function(r){return '<td class="mono" title="'+esc(r.peer)+(geoTip(r.peerAddr)?("  ·  "+esc(geoTip(r.peerAddr))):"")+'">'+esc(r.peer)+geoTag(r.peerAddr)+'</td>';}},
-  {h:"Process", sk:function(r){return lc(r.procName);}, cell:function(r){return '<td class="mono muted">'+esc(r.procName?(r.procName+(r.procPid?(" ("+r.procPid+")"):"")):trimStr(r.procRaw))+'</td>';}}
+  {h:"Score / tags", tip:"Suspicion score (>=3 is flagged) plus scoring tags - hover a tag for the full reasons", sk:function(r){return r.score;}, cell:function(r){return scoreCell(r);}},
+  {h:"Proto", tip:"tcp / udp (v6 sockets decoded too)", sk:function(r){return r.proto;}, cell:function(r){return '<td class="mono">'+esc(r.proto)+'</td>';}},
+  {h:"State", tip:"Socket state (LISTEN / ESTAB / ...)", sk:function(r){return r.state;}, cell:function(r){return '<td class="mono">'+esc(r.state)+'</td>';}},
+  {h:"Local", tip:"Local address:port", sk:function(r){return lc(r.local);}, cell:function(r){return '<td class="mono" title="'+esc(r.local)+'">'+esc(r.local)+'</td>';}},
+  {h:"Remote", tip:"Remote address:port - country/ASN chip when online geo/ASN is on", sk:function(r){return lc(r.peer);}, cell:function(r){return '<td class="mono" title="'+esc(r.peer)+(geoTip(r.peerAddr)?("  ·  "+esc(geoTip(r.peerAddr))):"")+'">'+esc(r.peer)+geoTag(r.peerAddr)+'</td>';}},
+  {h:"Process", tip:"Owning process (recovered from /proc/net uid + fd inodes on non-root captures)", sk:function(r){return lc(r.procName);}, cell:function(r){return '<td class="mono muted">'+esc(r.procName?(r.procName+(r.procPid?(" ("+r.procPid+")"):"")):trimStr(r.procRaw))+'</td>';}}
 ];
-function renderNet(){ var rows=[]; for(var i=0;i<NET.length;i++) if(passQ(NET[i])) rows.push(NET[i]);
-  sortRows(rows,NCOLS,SORT.net); drawTable(NCOLS,rows,SORT.net,"net"); profileEmptyMsg(NET.length,"network connections"); }
+function renderNet(){
+  var pub=false; try{ pub=$("netPubOnly").checked; }catch(enp){}
+  var rows=[]; for(var i=0;i<NET.length;i++){ var r=NET[i];
+    if(!passQ(r)) continue;
+    // v0.13: "public IPs only" - rows whose remote end is a routable public address
+    if(pub && !(r.peerAddr && !ipIsLocal(r.peerAddr))) continue;
+    rows.push(r); }
+  sortRows(rows,NCOLS,SORT.net); drawTable(NCOLS,rows,SORT.net,"net");
+  if(pub && NET.length) $("count").innerHTML+=" · public-remote rows only";
+  profileEmptyMsg(NET.length,"network connections"); }
 
 /* logon table (v0.2) */
 function logonDay(ep){ if(!ep) return 0; var d=new Date(ep*1000);
@@ -4077,13 +4190,13 @@ function logonSrcCell(r){ var p=logonSrcPath(r);
   return p ? '<td class="mono"><span class="lnk" data-open="'+esc(p)+'" title="Open the raw source file in Explorer">'+esc(r.src)+'</span></td>'
            : '<td class="mono muted">'+esc(r.src)+'</td>'; }
 var LCOLS=[
-  {h:"Score / tags", sk:function(r){return r.score;}, cell:function(r){return scoreCell(r);}},
-  {h:"When", sk:function(r){return r.epoch;}, cell:function(r){return '<td class="mono">'+esc(logonWhenCell(r))+'</td>';}},
-  {h:"Result", sk:function(r){return r.result;}, cell:function(r){return '<td class="mono">'+esc(r.result)+'</td>';}},
-  {h:"User", sk:function(r){return lc(r.user);}, cell:function(r){return '<td class="mono">'+esc(r.user)+'</td>';}},
-  {h:"Source", sk:function(r){return lc(r.ip);}, cell:function(r){return '<td class="mono" title="'+esc(r.ip)+(geoTip(r.ip)?("  ·  "+esc(geoTip(r.ip))):"")+'">'+esc(r.ip||"(local)")+geoTag(r.ip)+'</td>';}},
-  {h:"Method / cmd", sk:function(r){return r.method;}, cell:function(r){return '<td class="mono muted" title="'+esc(r.method+(r.cmd?("  "+r.cmd):""))+'">'+esc(trunc(logonMethodCell(r),70))+'</td>';}},
-  {h:"Source", sk:function(r){return r.src;}, cell:function(r){return logonSrcCell(r);}}
+  {h:"Score / tags", tip:"Suspicion score (>=3 is flagged) plus scoring tags - hover a tag for the full reasons", sk:function(r){return r.score;}, cell:function(r){return scoreCell(r);}},
+  {h:"When", tip:"Event time (UTC unless host TZ is ticked); classic-syslog rows carry the capture year", sk:function(r){return r.epoch;}, cell:function(r){return '<td class="mono">'+esc(logonWhenCell(r))+'</td>';}},
+  {h:"Result", tip:"accepted / failed / session / sudo / pkexec / acctchg / su / last-login", sk:function(r){return r.result;}, cell:function(r){return '<td class="mono">'+esc(r.result)+'</td>';}},
+  {h:"User", tip:"Account involved ((invalid) = user does not exist on the host)", sk:function(r){return lc(r.user);}, cell:function(r){return '<td class="mono">'+esc(r.user)+'</td>';}},
+  {h:"Source", tip:"Source IP ((local) = console/tty or no address recorded) - geo chip when enrichment is on", sk:function(r){return lc(r.ip);}, cell:function(r){return '<td class="mono" title="'+esc(r.ip)+(geoTip(r.ip)?("  ·  "+esc(geoTip(r.ip))):"")+'">'+esc(r.ip||"(local)")+geoTag(r.ip)+'</td>';}},
+  {h:"Method / cmd", tip:"Auth method / elevated command / tty or key fingerprint", sk:function(r){return r.method;}, cell:function(r){return '<td class="mono muted" title="'+esc(r.method+(r.cmd?("  "+r.cmd):""))+'">'+esc(trunc(logonMethodCell(r),70))+'</td>';}},
+  {h:"Source", tip:"Artifact this row came from - click to open the raw file", sk:function(r){return r.src;}, cell:function(r){return logonSrcCell(r);}}
 ];
 /* fill a <select> with distinct sorted values, preserving the current selection */
 function fillSelect(id, label, values){ var el=$(id); if(!el) return; var cur=el.value;
@@ -4128,13 +4241,13 @@ function fmtTime(sec, withSecs){ if(!sec) return "-"; var d=new Date(tzAdj(sec)*
   if(withSecs) s+=":"+p2n(d.getUTCSeconds()); return s; }
 function epochShort(sec){ return fmtTime(sec,false); }
 var TCOLS=[
-  {h:"Score / tags", sk:function(r){return r.score;}, cell:function(r){return scoreCell(r);}},
-  {h:"mtime (UTC)", sk:function(r){return r.mtime;}, cell:function(r){return '<td class="mono">'+esc(epochShort(r.mtime))+'</td>';}},
-  {h:"ctime (UTC)", sk:function(r){return r.ctime;}, cell:function(r){return '<td class="mono muted">'+esc(epochShort(r.ctime))+'</td>';}},
-  {h:"Size", sk:function(r){return r.size;}, cell:function(r){return '<td class="mono" style="text-align:center">'+esc(fmtSize(r.size))+'</td>';}},
-  {h:"Mode", sk:function(r){return r.mode;}, cell:function(r){return '<td class="mono">'+esc(r.mode)+'</td>';}},
-  {h:"UID", sk:function(r){return parseInt(r.uid,10)||0;}, cell:function(r){return '<td class="mono" style="text-align:center">'+esc(r.uid)+'</td>';}},
-  {h:"Path", sk:function(r){return lc(r.path);}, cell:function(r){return '<td class="mono" title="'+esc(r.path)+'">'+esc(trunc(r.path,150))+'</td>';}}
+  {h:"Score / tags", tip:"Suspicion score (>=3 is flagged) plus scoring tags - hover a tag for the full reasons", sk:function(r){return r.score;}, cell:function(r){return scoreCell(r);}},
+  {h:"mtime (UTC)", tip:"Content-modified time (bodyfile epoch; detail pane shows atime/crtime too)", sk:function(r){return r.mtime;}, cell:function(r){return '<td class="mono">'+esc(epochShort(r.mtime))+'</td>';}},
+  {h:"ctime (UTC)", tip:"Inode-changed time (metadata: permissions/owner/link changes)", sk:function(r){return r.ctime;}, cell:function(r){return '<td class="mono muted">'+esc(epochShort(r.ctime))+'</td>';}},
+  {h:"Size", tip:"File size", sk:function(r){return r.size;}, cell:function(r){return '<td class="mono" style="text-align:center">'+esc(fmtSize(r.size))+'</td>';}},
+  {h:"Mode", tip:"Unix mode string (s = setuid/setgid bit, scored)", sk:function(r){return r.mode;}, cell:function(r){return '<td class="mono">'+esc(r.mode)+'</td>';}},
+  {h:"UID", tip:"Owner uid", sk:function(r){return parseInt(r.uid,10)||0;}, cell:function(r){return '<td class="mono" style="text-align:center">'+esc(r.uid)+'</td>';}},
+  {h:"Path", tip:"Full path on the collected host", sk:function(r){return lc(r.path);}, cell:function(r){return '<td class="mono" title="'+esc(r.path)+'">'+esc(trunc(r.path,150))+'</td>';}}
 ];
 function renderTime(){ var rows=[]; for(var i=0;i<TIMEL.length;i++){ var r=TIMEL[i];
     if(!passQ(r)) continue;
@@ -4152,7 +4265,12 @@ function renderInventory(){
     if(QUERY && it.blob.indexOf(QUERY)<0) continue;
     rows.push(it); }
   var present=0; for(i=0;i<INVENTORY.length;i++) if(INVENTORY[i].present) present++;
-  var html="<thead><tr><th>Category</th><th>Artifact</th><th>Description</th><th>Present</th><th>Size / files</th><th>Raw file</th></tr></thead><tbody>";
+  var html='<thead><tr><th title="Artifact category (processes / network / logons / logs / ...)">Category</th>'
+    +'<th title="The specific collected artifact">Artifact</th>'
+    +'<th title="What this artifact is used for in triage">Description</th>'
+    +'<th title="Whether this capture contains it (absent is normal for narrower profiles)">Present</th>'
+    +'<th title="Size, or file count for directory artifacts">Size / files</th>'
+    +'<th title="Open the raw file in Explorer">Raw file</th></tr></thead><tbody>';
   for(i=0;i<rows.length;i++){ var r=rows[i];
     var pres = r.present ? '<span class="pgood">present</span>' : '<span class="pmiss">absent</span>';
     var sz = r.present ? ((r.kind==="dir"||r.kind==="userfile") ? (nf(r.count)+" file(s)"+(r.size?(", "+fmtSize(r.size)):"")) : fmtSize(r.size)) : "-";
@@ -4231,18 +4349,7 @@ function renderLogs(){
       H.push('<tr'+(e.sev>=3?' class="row-flag"':(e.sev>=2?' class="row-warn"':''))+'><td class="mono muted'+(e.sev>=2?' first':'')+'">'+esc(e.kind)+'</td><td class="mono">'+esc(e.detail)+'</td></tr>'); }
     H.push('</tbody></table></div>'); }
   H.push('</div></div></div>');
-  // sar
-  if(SARSUM){ var S=SARSUM;
-    H.push('<div class="card"><h3>sysstat / sar CPU summary</h3>');
-    H.push('<div>'+statCard(nf(S.days),"sar day-files","")+statCard(nf(S.intervals),"intervals","")
-      +statCard(S.maxUsr.toFixed(0)+"%","peak %usr", S.maxUsr>=80?"warn":"")
-      +statCard(nf(S.busy.length),">=80% usr", S.busy.length?"warn":"")+'</div>');
-    if(S.busy.length){ H.push('<div class="scroll" style="max-height:18vh"><table><thead><tr><th>Date</th><th>Time</th><th>%usr</th><th>%idle</th></tr></thead><tbody>');
-      for(i=0;i<S.busy.length && i<20;i++){ var bz=S.busy[i];
-        H.push('<tr class="row-warn"><td class="mono first">'+esc(bz.date)+'</td><td class="mono">'+esc(bz.time)+'</td><td class="mono" style="text-align:right">'+bz.usr.toFixed(1)+'</td><td class="mono" style="text-align:right">'+bz.idle.toFixed(1)+'</td></tr>'); }
-      H.push('</tbody></table></div>'); }
-    H.push('</div>');
-  }
+  // v0.13: the sar CPU summary moved to the TOP of the Overview tab (sarSummaryHtml)
   $("logsBody").innerHTML=H.join("");
   var tbls=$("logsBody").getElementsByTagName("table");
   for(var t=0;t<tbls.length;t++){ setupColResizeFor(tbls[t],"logs"+t); }
@@ -4266,7 +4373,11 @@ function renderEvents(){
     rows.push(e);
   }
   var shown=rows.length>MAXROWS?MAXROWS:rows.length;
-  var html='<thead><tr><th>When ('+esc(tzLabel())+')</th><th>Kind</th><th>Score</th><th>Event</th><th>Source</th></tr></thead><tbody>';
+  var html='<thead><tr><th title="Event time - click a cell to pivot the Timeline ±15 min">When ('+esc(tzLabel())+')</th>'
+    +'<th title="Event kind: logon / package / boot / journal-gap / web / audit / history / ...">Kind</th>'
+    +'<th title="Suspicion score carried over from the source row">Score</th>'
+    +'<th title="Event summary - hover for the full text">Event</th>'
+    +'<th title="Which parser/artifact produced this event">Source</th></tr></thead><tbody>';
   if(!EVENTS.length) html+='<tr><td colspan="5" class="muted">No time-stamped events yet. Analyze a capture; on the Logs tab, "Load journal contents (WSL)" adds journal events.</td></tr>';
   for(i=0;i<shown;i++){ var r=rows[i]; var rc=r.score>=5?"row-flag":(r.score>=3?"row-warn":"");
     html+='<tr'+(rc?(' class="'+rc+'"'):'')+'><td class="mono lnk" data-ep="'+r.epoch+'" title="Click: pivot the Timeline tab to ±15 min around this event">'+esc(fmtTime(r.epoch,true))+'</td>'
@@ -4294,10 +4405,10 @@ function exportEvents(){
 
 /* ioc hits table */
 var ICOLS=[
-  {h:"File", sk:function(r){return lc(r.file);}, cell:function(r){return '<td class="mono first" title="'+esc(r.file)+'">'+esc(trunc(r.file,80))+'</td>';}},
-  {h:"Line", sk:function(r){return r.line;}, cell:function(r){return '<td class="mono" style="text-align:right">'+esc(r.line)+'</td>';}},
-  {h:"IOC", sk:function(r){return r.ioc;}, cell:function(r){return '<td class="mono"><span class="tag ioc">'+esc(r.ioc)+'</span></td>';}},
-  {h:"Excerpt", sk:function(r){return lc(r.excerpt);}, cell:function(r){return '<td class="mono" title="'+esc(r.excerpt)+'">'+esc(trunc(r.excerpt,140))+'</td>';}}
+  {h:"File", tip:"Capture-relative path of the file the IOC term matched in", sk:function(r){return lc(r.file);}, cell:function(r){return '<td class="mono first" title="'+esc(r.file)+'">'+esc(trunc(r.file,80))+'</td>';}},
+  {h:"Line", tip:"Line number of the match (0 = hash_executables SHA1 match)", sk:function(r){return r.line;}, cell:function(r){return '<td class="mono" style="text-align:right">'+esc(r.line)+'</td>';}},
+  {h:"IOC", tip:"The operator-supplied IOC/keyword term that matched", sk:function(r){return r.ioc;}, cell:function(r){return '<td class="mono"><span class="tag ioc">'+esc(r.ioc)+'</span></td>';}},
+  {h:"Excerpt", tip:"The matching line (truncated to 300 chars at sweep time)", sk:function(r){return lc(r.excerpt);}, cell:function(r){return '<td class="mono" title="'+esc(r.excerpt)+'">'+esc(trunc(r.excerpt,140))+'</td>';}}
 ];
 function renderIoc(){
   var rows=[]; for(var i=0;i<IOCHITS.length;i++){ var r=IOCHITS[i];
@@ -4310,7 +4421,7 @@ function renderIoc(){
   var shown=rows.length>MAXROWS?MAXROWS:rows.length;
   var html="<thead><tr>";
   for(var c=0;c<ICOLS.length;c++){ var arrow=(st.k===c)?(st.d>0?" ▲":" ▼"):"";
-    html+='<th data-k="'+c+'">'+esc(ICOLS[c].h)+arrow+'</th>'; }
+    html+='<th data-k="'+c+'" title="'+esc((ICOLS[c].tip?ICOLS[c].tip+" · ":"")+"Click to sort; drag the right edge to resize")+'">'+esc(ICOLS[c].h)+arrow+'</th>'; }
   html+="</tr></thead><tbody>";
   if(!IOCS.length){ html+='<tr><td colspan="4" class="muted">No IOC / keyword terms loaded - add some via "IOC / keywords…" then re-Analyze to sweep the tree.</td></tr>'; }
   else if(!rows.length){ html+='<tr><td colspan="4" class="ok">No IOC hits in the swept tree.</td></tr>'; }
@@ -4773,6 +4884,172 @@ function openInExplorer(path){
 }
 
 /* ---------- wiring ---------- */
+/* ---------- v0.13: Generate report - self-contained HTML with a navigation pane ----------
+   One file, no external assets, safe to attach to a case. Scored tables are capped at the
+   highest-signal rows (score-sorted) with the cap disclosed; full data stays in the app/CSVs. */
+var REPORT_ROWCAP=500;
+function repRows(arr, cap, mapFn, scoreSort){
+  var a=arr.slice(0);
+  if(scoreSort) a.sort(function(x,y){ return (y.score||0)-(x.score||0); });
+  var out=[], n=a.length>cap?cap:a.length;
+  for(var i=0;i<n;i++){ out.push(mapFn(a[i])); }
+  return {rows:out, total:arr.length, shown:n};
+}
+function repTable(heads, rr, note){
+  var h=['<table><thead><tr>'];
+  for(var i=0;i<heads.length;i++) h.push('<th>'+esc(heads[i])+'</th>');
+  h.push('</tr></thead><tbody>');
+  if(!rr.rows.length) h.push('<tr><td colspan="'+heads.length+'" class="muted">(none in this capture)</td></tr>');
+  for(var r=0;r<rr.rows.length;r++){ var row=rr.rows[r];
+    h.push('<tr'+(row.cls?(' class="'+row.cls+'"'):'')+'>');
+    for(var c=0;c<row.cells.length;c++) h.push('<td>'+esc(String(row.cells[c]==null?"":row.cells[c]))+'</td>');
+    h.push('</tr>');
+  }
+  h.push('</tbody></table>');
+  if(rr.shown<rr.total) h.push('<p class="muted">showing the '+nf(rr.shown)+' highest-signal of '+nf(rr.total)+' rows - the full set is in the app / CSV exports.</p>');
+  if(note) h.push('<p class="muted">'+esc(note)+'</p>');
+  return h.join("");
+}
+function repCls(sc){ return sc>=5?"flag":(sc>=3?"warn":""); }
+function repScore(r){ return r.score+(r.tags&&r.tags.length?(" ["+r.tags.join(",")+"]"):""); }
+function generateReport(){
+  if(!LASTROOT){ setStatus("Analyze a capture first - the report renders what the app has parsed.","err"); return; }
+  try{
+    setStatus("Generating HTML report…","muted");
+    var host=META.host||sanitHost($("hostName").value)||"host";
+    var S=[], NAV=[];
+    function section(id, title, html){ NAV.push('<a href="#sec-'+id+'">'+esc(title)+'</a>');
+      S.push('<section id="sec-'+id+'"><h2>'+esc(title)+'</h2>'+html+'</section>'); }
+    // --- Overview ---
+    var ov=[];
+    ov.push('<table class="kv">');
+    function kv(k,v){ if(v) ov.push('<tr><th>'+esc(k)+'</th><td>'+esc(v)+'</td></tr>'); }
+    kv("Host", META.host); kv("OS / arch", (META.os||"")+(META.arch?(" / "+META.arch):""));
+    kv("UAC version", META.uacVer); kv("Collected (host TZ)", META.started+(META.tz?("  "+META.tz):""));
+    kv("Boot time (host local)", META.bootTime); kv("Uptime", META.uptime);
+    kv("Collected as", META.runAs); kv("Collection command", META.cmdLine);
+    kv("Collection profile", CAPPROF?CAPPROF.label:"");
+    kv("Analyzed by", "UAC Triage Tool v"+APP_VERSION);
+    kv("Report generated (UTC)", (function(){ var d=new Date(); return d.getUTCFullYear()+"-"+p2n(d.getUTCMonth()+1)+"-"+p2n(d.getUTCDate())+" "+p2n(d.getUTCHours())+":"+p2n(d.getUTCMinutes())+"Z"; })());
+    kv("Case window", (CASE_FROM||CASE_TO)?((CASE_FROM||"…")+" to "+(CASE_TO||"…")):"");
+    ov.push('</table>');
+    var fl=buildRunSummary();
+    if(fl) ov.push('<p>'+nf(fl.entries)+' parsed entries; <b>'+nf(fl.flagged)+' flagged</b> (score ≥ 3 / IOC). Datasets: '
+      +nf(PROC.length)+' processes, '+nf(NET.length)+' connections, '+nf(LOGON.length)+' logons, '+nf(USERS.length)+' accounts, '
+      +nf(TIMEL.length)+' timeline rows, '+nf(EVENTS.length)+' events, '+nf(WEBCAP.total)+' web requests, '+nf(AUDITCAP.total)+' audit records, '
+      +nf(PERSFIND.length)+' persistence lines, '+nf(PKGS.length)+' package actions, '+nf(CONTAINERS.length)+' containers, '+nf(IOCHITS.length)+' IOC hits.</p>');
+    // possible ATT&CK mappings (same derivation as the Overview tab)
+    var tSeen={}, tList=[];
+    function coll(arr,thr){ for(var z=0;z<arr.length;z++){ if(arr[z].score>=thr){ var tt=techsForTags(arr[z].tags||[]);
+      for(var y=0;y<tt.length;y++){ if(!tSeen[tt[y].id]){ tSeen[tt[y].id]=1; tList.push(tt[y]); } } } } }
+    coll(PROC,3); coll(NET,3); coll(LOGON,3); coll(PERSFIND,2); coll(CONTAINERS,2);
+    if(tList.length){ tList.sort(function(a,b){ return a.id<b.id?-1:1; });
+      var ts=[]; for(var q3=0;q3<tList.length;q3++) ts.push(tList[q3].id+" ("+tList[q3].name+")");
+      ov.push('<p><b>Possible ATT&CK technique mappings ('+tList.length+', heuristic):</b> '+esc(ts.join(" · "))+'</p>'); }
+    if(SARSUM && SARSUM.busy.length) ov.push('<p class="warn-t"><b>sar:</b> '+nf(SARSUM.busy.length)+' interval(s) at ≥80% user CPU (peak '+SARSUM.maxUsr.toFixed(0)+'%) - review for cryptomining.</p>');
+    ov.push(repTable(["Sev","Check","Detail"],
+      repRows(INTEGRITY, 100, function(r){ return {cls:(r.sev>=3?"flag":(r.sev>=2?"warn":"")), cells:[r.sev, r.check, r.detail]}; }),
+      "Log-integrity findings (tamper / rotation / layout checks)."));
+    if(LATERAL.length) ov.push('<h3>Lateral movement evidence</h3>'+repTable(["Evidence","User","Destination","Detail"],
+      repRows(LATERAL, 200, function(r){ return {cls:repCls(r.score)||(r.corrob?"warn":""), cells:[r.kind+(r.corrob?" CORROB":""), r.user, r.dest+(geoTip(r.dest)?(" ["+geoTip(r.dest)+"]"):""), r.evidence]}; }, true)));
+    section("overview","Overview", ov.join(""));
+    // --- Inventory ---
+    section("inventory","Inventory", repTable(["Category","Artifact","Present","Size / files"],
+      repRows(INVENTORY, 400, function(r){ return {cls:"", cells:[r.cat, r.name, r.present?"present":"absent", r.present?((r.kind==="dir"||r.kind==="userfile")?(nf(r.count)+" file(s)"):fmtSize(r.size)):"-"]}; })));
+    // --- Processes ---
+    section("processes","Processes", repTable(["Score","User","PID","PPID","CPU%","Command"],
+      repRows(PROC, REPORT_ROWCAP, function(r){ return {cls:repCls(r.score), cells:[repScore(r), r.user, r.pid, r.ppid, (r.cpu>=0?r.cpu.toFixed(1):"-"), trunc(r.cmd,180)]}; }, true)));
+    // --- Network ---
+    section("network","Network", repTable(["Score","Proto","State","Local","Remote","Geo/ASN","Process"],
+      repRows(NET, REPORT_ROWCAP, function(r){ return {cls:repCls(r.score), cells:[repScore(r), r.proto, r.state, r.local, r.peer, geoTip(r.peerAddr), (r.procName||"")+(r.procPid?(" ("+r.procPid+")"):"")]}; }, true)));
+    // --- Logons ---
+    var lg=[];
+    lg.push('<h3>By source IP</h3>'+repTable(["Source IP","Geo/ASN","First seen","Last seen","Failures","Successes","Users tried"],
+      repRows(buildLogonByIp(), 300, function(r){ return {cls:(r.fails>=5&&r.okc?"flag":repCls(r.score)), cells:[r.ip, geoTip(r.ip), r.first?fmtTime(r.first,true):"-", r.last?fmtTime(r.last,true):"-", r.fails, r.okc, r.userN+(r.userList?(" ("+trunc(r.userList,60)+")"):"")]}; }, true)));
+    lg.push('<h3>Highest-signal logon events</h3>'+repTable(["Score","When ("+tzLabel()+")","Result","User","Source","Method / cmd","Artifact"],
+      repRows(LOGON, REPORT_ROWCAP, function(r){ return {cls:repCls(r.score), cells:[repScore(r), logonWhenCell(r), r.result, r.user, (r.ip||"(local)")+(geoTip(r.ip)?(" ["+geoTip(r.ip)+"]"):""), trunc(logonMethodCell(r),90), r.src]}; }, true)));
+    section("logons","Logons", lg.join(""));
+    // --- Users ---
+    section("users","Users", repTable(["Score","UID","User","Shell","Groups","Password","SSH keys","History","Last login"],
+      repRows(USERS, 300, function(r){ return {cls:repCls(r.score), cells:[repScore(r), r.uid, r.user, r.shell, r.groups.join(", "), (r.locked===null?"-":(r.locked?"locked":(r.hasPw?"set":"EMPTY"))), r.keys||"-", r.hist||"-", r.lastEp?(fmtTime(r.lastEp,false)+(r.lastIp?(" "+r.lastIp):"")):"-"]}; })));
+    // --- Persistence ---
+    var pe2=[];
+    pe2.push(repTable(["Score","When","Source","Kind","Command line"],
+      repRows((function(){ var a=[]; for(var i4=0;i4<PERSFIND.length;i4++){ if(PERSFIND[i4].score>=1) a.push(PERSFIND[i4]); } return a; })(), REPORT_ROWCAP,
+        function(r){ return {cls:repCls(r.score), cells:[repScore(r), r.epoch?fmtTime(r.epoch,true):"-", r.src, r.detail, trunc(r.cmd,160)]}; }, true),
+      "Scored persistence command lines (benign score-0 lines are omitted)."));
+    pe2.push('<h3>Persistence &amp; config inventory</h3>'+repTable(["Artifact","Present","Size / files","Path"],
+      repRows(PERSIST, 100, function(r){ return {cls:(r.ioc?"flag":""), cells:[r.label, r.present?(r.ioc?"present, IOC":"present"):"absent", r.present?((r.dir||r.userfile)?(nf(r.count)+" file(s)"):fmtSize(r.size)):"-", r.rel]}; })));
+    section("persistence","Persistence", pe2.join(""));
+    // --- Timeline ---
+    section("timeline","Timeline", repTable(["Score","mtime (UTC)","ctime (UTC)","Size","Mode","UID","Path"],
+      repRows((function(){ var a=[]; for(var i5=0;i5<TIMEL.length;i5++){ if(TIMEL[i5].score>=1) a.push(TIMEL[i5]); } return a; })(), REPORT_ROWCAP,
+        function(r){ return {cls:repCls(r.score), cells:[repScore(r), epochShort(r.mtime), epochShort(r.ctime), fmtSize(r.size), r.mode, r.uid, trunc(r.path,180)]}; }, true),
+      "Scored bodyfile rows only ("+nf(TIMEL.length)+" rows loaded in-app"+(TIMECAP.total>TIMECAP.shown?(" of "+nf(TIMECAP.total)+" total - parse cap"):"")+")."));
+    // --- Events ---
+    section("events","Events", repTable(["When ("+tzLabel()+")","Kind","Score","Event","Source"],
+      repRows((function(){ var a=[]; for(var i6=0;i6<EVENTS.length;i6++){ if(EVENTS[i6].score>=1) a.push(EVENTS[i6]); } return a; })(), 1000,
+        function(r){ return {cls:repCls(r.score), cells:[fmtTime(r.epoch,true), r.kind, r.score, trunc(r.label,160), r.src]}; }),
+      "Scored events in chronological order (score-0 context rows omitted)."));
+    // --- Web logs ---
+    section("weblogs","Web logs", repTable(["Score","When","Client IP","Geo/ASN","Method","Status","URI","User-Agent"],
+      repRows(WEBLOG, REPORT_ROWCAP, function(r){ return {cls:repCls(r.score), cells:[repScore(r), r.epoch?fmtTime(r.epoch,true):"-", r.ip, geoTip(r.ip), r.method, r.status, trunc(r.uri,140), trunc(r.ua,60)]}; }, true),
+      WEBCAP.total?("Parsed "+nf(WEBCAP.total)+" request lines"+(WEBCAP.total>WEBCAP.shown?(", "+nf(WEBCAP.shown)+" stored (cap)"):"")+"."):""));
+    // --- Audit ---
+    section("audit","Audit", repTable(["Score","When","Type","User","Source IP","Detail"],
+      repRows(AUDITX, REPORT_ROWCAP, function(r){ return {cls:repCls(r.score), cells:[repScore(r), fmtTime(r.epoch,true), r.typ, r.user, r.ip, trunc(r.detail,160)]}; }, true)));
+    // --- Apps ---
+    var ap=[];
+    ap.push('<h3>Recent package activity</h3>'+repTable(["When","Action","Package","Requested by"],
+      repRows(PKGS, 300, function(r){ return {cls:(r.susp?"warn":""), cells:[r.when, r.action, r.pkg+(r.susp?(" [SUS: "+r.susp+"]"):""), r.by||"-"]}; })));
+    ap.push('<h3>Containers</h3>'+repTable(["Score","Engine","Image","Command","Status","Name"],
+      repRows(CONTAINERS, 100, function(r){ return {cls:repCls(r.score), cells:[repScore(r), r.engine, r.image, trunc(r.cmd,60), r.status, r.names]}; }, true)));
+    section("apps","Apps", ap.join(""));
+    // --- Browser ---
+    section("browser","Browser", repTable(["Browser","User","Database","Size","WAL sidecar"],
+      repRows(BROWSERDBS, 100, function(r){ return {cls:"", cells:[r.browser, r.user, r.name, fmtSize(r.size), r.wal?"present":"absent"]}; }),
+      "Analyze these with the SQLECmd wrapper hand-off from the app's Browser tab."));
+    // --- Logs ---
+    var lo=[];
+    lo.push('<h3>Notable log events</h3>'+repTable(["Sev","Kind","Detail"],
+      repRows((function(){ var a=LOGEVENTS.slice(0); a.sort(function(x,y){ return (y.sev||0)-(x.sev||0); }); return a; })(), 100,
+        function(r){ return {cls:(r.sev>=3?"flag":(r.sev>=2?"warn":"")), cells:[r.sev||0, r.kind, trunc(r.detail,200)]}; })));
+    if(JOURNAL) lo.push('<p>systemd journal: '+nf(JOURNAL.sysCount+JOURNAL.userCount)+' archived files, '+nf(JOURNAL.generations)+' generation(s), '+nf(JOURNAL.flagged.length)+' rotation-interval anomal'+(JOURNAL.flagged.length===1?"y":"ies")+'.</p>');
+    if(BOOTS.length) lo.push('<p>'+nf(BOOTS.length)+' boot(s) in journalctl --list-boots.</p>');
+    section("logs","Logs", lo.join(""));
+    // --- IOC hits ---
+    section("iochits","IOC hits", repTable(["File","Line","IOC","Excerpt"],
+      repRows(IOCHITS, 1000, function(r){ return {cls:"flag", cells:[r.file, r.line, r.ioc, trunc(r.excerpt,200)]}; }),
+      IOCS.length?("Swept against "+nf(IOCS.length)+" IOC/keyword term(s)."):"No IOC terms were loaded for this run."));
+    // --- assemble ---
+    var css='body{margin:0;font:13px/1.5 "Segoe UI",Arial,sans-serif;background:#0d1117;color:#c9d1d9}'
+      +'nav{position:fixed;top:0;left:0;bottom:0;width:190px;background:#161b22;border-right:1px solid #30363d;padding:14px;overflow:auto}'
+      +'nav h2{font-size:14px;color:#58a6ff;margin:0 0 10px}nav a{display:block;color:#8b949e;text-decoration:none;padding:4px 6px;border-radius:4px;font-size:12px}'
+      +'nav a:hover{background:#21262d;color:#c9d1d9}'
+      +'main{margin-left:218px;padding:18px 26px;max-width:1400px}'
+      +'h1{font-size:20px;color:#e6edf3}h2{font-size:16px;color:#58a6ff;border-bottom:1px solid #30363d;padding-bottom:4px;margin-top:34px}'
+      +'h3{font-size:13px;color:#e6edf3;text-transform:uppercase;letter-spacing:.4px}'
+      +'table{border-collapse:collapse;width:100%;margin:8px 0;font-size:12px}'
+      +'th{background:#161b22;color:#8b949e;text-align:left;padding:5px 8px;border:1px solid #30363d;position:sticky;top:0}'
+      +'td{padding:4px 8px;border:1px solid #21262d;font-family:Consolas,monospace;font-size:11.5px;word-break:break-word}'
+      +'tr.warn td{background:#2b2411}tr.flag td{background:#3d1d1d}'
+      +'table.kv th{width:220px;font-weight:600}'
+      +'.muted{color:#8b949e;font-size:11px}.warn-t{color:#e3b341}'
+      +'@media print{nav{display:none}main{margin-left:0}}';
+    var html='<!DOCTYPE html><html><head><meta charset="utf-8"><title>UAC triage report - '+esc(host)+'</title><style>'+css+'</style></head><body>'
+      +'<nav><h2>UAC report</h2>'+NAV.join("")+'</nav>'
+      +'<main><h1>UAC triage report - '+esc(host)+'</h1>'
+      +'<p class="muted">Times are '+esc(tzLabel())+' unless a column says otherwise. Scores: 3-4 amber (suspicious), 5+ red (high). '
+      +'Heuristic output for triage - verify findings against the raw artifacts before reporting them as fact.</p>'
+      +S.join("")+'</main></body></html>';
+    var path=String(LASTOUTDIR).replace(/[\\\/]+$/,"")+"\\report_"+sanitHost(host)+"_"+nowStamp()+".html";
+    writeUtf8(path, html);
+    appendLog("Report written: "+path);
+    setStatus("Report generated → "+path,"ok");
+    openManualFile(path);
+  }catch(e){ setStatus("Report generation failed: "+e.message,"err"); appendLog("Report generation failed: "+e.message); }
+}
+
 function init(){
   try{ window.resizeTo(1360,920); }catch(e){}
   $("appver").innerHTML="&middot; v"+APP_VERSION;
@@ -4848,6 +5125,8 @@ function init(){
   $("logfUser").onchange=function(){ render(); };
   $("logfSrc").onchange=function(){ render(); };
   $("logfResult").onchange=function(){ render(); };
+  $("netPubOnly").onclick=function(){ render(); };      // v0.13
+  $("reportBtn").onclick=generateReport;                // v0.13
   $("dfrom").onchange=function(){ DFROM=dayNum(this.value); if(LASTROOT){ reparseTimeline(); } };
   $("dto").onchange=function(){ DTO=dayNum(this.value); if(LASTROOT){ reparseTimeline(); } };
   $("clearBtn").onclick=function(){ $("q").value=""; QUERY=""; $("susOnly").checked=false; SUSONLY=false;
@@ -4880,6 +5159,7 @@ function init(){
     // element-level actions first (data-open / data-pf can live on a td or span, not the tr)
     var op=attrUp(t,"data-open"); if(op){ openInExplorer(op); return; }
     var jmp=attrUp(t,"data-jump"); if(jmp){ var je=$(jmp); if(je && je.scrollIntoView) try{ je.scrollIntoView(true); }catch(ej){} return; }
+    var gt2=attrUp(t,"data-gotab"); if(gt2){ setTab(gt2); return; }   // v0.13: stat cards can open a tab
     var bdb=attrUp(t,"data-bdb"); if(bdb!=null && bdb!==""){ sendToSqlecmd(parseInt(bdb,10)); return; }
     var pfa=attrUp(t,"data-pf"); if(pfa!=null && pfa!==""){ openPersistFile(parseInt(pfa,10)); return; }
     // process-tree (v0.7): fold toggle + open detail by pid
@@ -4958,6 +5238,7 @@ window.onload=function(){ init(); try{ window.setTimeout(checkSelfUpdate,600); }
       <li><b>Inventory tab</b> - a map of every key artifact (processes, network, logons, accounts, persistence, system, filesystem, logs, containers) showing present/absent, size, and an <b>open folder</b> link that opens the raw file in Explorer. The Persistence &amp; config inventory on Overview has the same open-folder links; click an artifact name there to view its contents inline.</li>
       <li><b>UI (v0.7):</b> the Processes table has a <b>Name</b> column and a <b>Tree view</b> toggle (collapsible parent/child hierarchy - click ▸/▾ to fold, a row for detail). <b>Logons</b> has User / Source / Result filters and a clickable link to each raw source log. <b>Events</b> has a min-score filter and a kind filter. Long tables keep their <b>header row frozen</b> while scrolling, and <b>Persistence &amp; system findings</b> shows a date/time column.</li>
       <li><b>Resizable columns</b> everywhere - drag the right edge of any column header (it highlights on hover); double-click the edge to reset. Widths persist per view.</li>
+      <li><b>Layout &amp; reporting release (v0.13):</b> the tab bar is reorganised (Inventory sits beside Overview) and three sections graduated to their own tabs - <b>Persistence</b> (scored findings + config inventory), <b>Apps</b> (package installs + containers) and <b>Browser</b> (browser DBs + SQLECmd hand-off) - leaving the Overview focused on metadata, stats, top findings and lateral movement, with the <b>sar CPU summary</b> now pinned at its top (a cryptominer tell shouldn't hide on the Logs tab). <b>Generate report</b> (Overview button) writes a self-contained dark-theme HTML report with a navigation pane mirroring the tab names - score-sorted tables capped at the highest-signal rows, caps disclosed, safe to attach to a case. The Network tab gains a <b>public IPs only</b> filter, and <b>every table heading now carries a tooltip</b> explaining the column. Perf: the persistence deep-parse dropped from ~10 s to a fraction via a singleton FSO + fast reads for directory sweeps (found via the new v0.12 [perf] log).</li>
       <li><b>Progress &amp; perf-diagnostics release (v0.12):</b> a <b>processing-time pill</b> in the header ticks m:ss every half-second through extraction and parsing (the parser pipeline now yields to the UI between steps, so the clock genuinely moves - a frozen pill plus a never-changing step name in the status line means a real hang). The status line shows the <b>current step (k/38)</b> by name. Every step's duration is logged as <code>[perf]</code> lines (slow steps inline, full table at the end, incl. the slowest step and extraction time), external commands (bsdtar, robocopy, PowerShell, WSL journalctl) log their run time and exit code, and a failing parser is <b>skipped and logged</b> instead of aborting everything after it. The complete on-screen log (with all <code>[perf]</code> lines) is written to <code>parse_log_&lt;stamp&gt;.txt</code> beside the other outputs after each run - attach that file to any performance/bug report. <code>runinfo.json</code> gains <code>extractMs</code>, <code>parseMs</code> and the per-step timing array.</li>
       <li><b>Triage-workflow release (v0.11):</b> three new tabs - <b>Web logs</b> (apache/nginx/httpd access logs parsed &amp; scored: POSTs to script URIs, traversal/encoded payloads, tool user-agents - the initial-access evidence the live web-shell check can't see), <b>Users</b> (per-account: shell, groups, shadow lock state, authorized_keys count, history size, last login), and <b>Audit</b> (auditd <code>execve</code> args - hex-decoded - plus login records: the closest Linux gets to process-creation telemetry). <b>Logons → By source IP</b> aggregates first/last seen, failures, successes and users tried per source. <b>Pivot ±15 min:</b> click an Events timestamp (or the link in any logon/web/audit detail pane) to jump to the filesystem Timeline windowed around that moment - the anchor-and-expand workflow. <b>Lateral movement panel</b> (Overview): known_hosts destinations + <code>~/.ssh/config</code> + typed ssh/scp/rsync commands, corroboration-tagged. <b>Online geo/ASN enrichment</b> (checkbox, default on; <code>offline.txt</code> overrules): public IPs across logons/network/web/audit get country + ASN chips via ip-api.com - only the bare IP list is sent, never case data. Persistence sweeps extended to <code>update-motd.d</code>, APT <code>Pre/Post-Invoke</code> hooks, <code>modprobe.d install</code> lines, XDG autostart, shell startup files, and <b>PAM module directories</b> (a non-<code>pam_*.so</code> shared object there is the 2025 Plague-backdoor pattern). <code>/etc/hosts</code> pins and known LKM-rootkit module names surface on the Logs tab, and Events gains a <b>hide TOOLING</b> toggle.</li>
       <li><b>Evidence-hygiene &amp; correctness release (v0.10):</b> host-local timestamps (classic syslog, <code>last -F</code>, boot tables, apt/dpkg logs) are normalized to UTC at ingest using the collector's offset, with Dec→Jan year-rollover handling - the host-TZ toggle is now exact for every source. Extracted-<b>folder</b> input is treated as read-only evidence: rotated <code>.gz</code> logs inflate into a per-run <code>gzcache</code> under the output directory instead of the source tree. WSL journal events reset between captures (no cross-case carry-over). A <b>hostname-mismatch gate</b> stops analysis when uac.log disagrees with the typed Target hostname. Dual-use package installs (nmap, tcpdump, …) are tagged <b>TOOLING</b> - context, no longer counted as IOC or auto-flagged. wtmp/btmp/lastlog binary decode is gated to Linux glibc x86-64 captures with per-record timestamp validation, and the host's own <code>last/lastb</code> text output is preferred when present. CSV exports neutralize formula-injection cells. Classic-syslog service inventory and hostname-consistency checks fixed (both silently failed or false-fired on <code>Jul 17 12:34:56</code>-style logs). IPv6 <code>/proc/net</code> sockets are decoded. <b>Offline mode:</b> an <code>offline.txt</code> next to the app disables every outbound network feature. <code>runinfo.json</code> gains run id, capture host, UAC version, profile and TZ offset, and <code>finishedUtc</code> is now really UTC.</li>
