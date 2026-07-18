@@ -75,6 +75,8 @@
   .btn.primary{background:#1f6feb;border-color:#1f6feb}
   .btn.violet{background:#8957e5;border-color:#8957e5;color:#fff}
   .btn.violet:hover{border-color:#a371f7}
+  .btn.green{background:#238636;border-color:#238636;color:#fff}
+  .btn.green:hover{border-color:#2ea043}
   .btn.on{background:#1f6feb;border-color:#1f6feb;color:#fff}
   /* v1.4: per-tab table heading (shared table card) */
   .tblhead{margin:0 0 8px;font-size:13px;font-weight:600;color:#e6edf3}
@@ -210,12 +212,12 @@
         <button class="btn" id="tabLogon" data-tab="logon" title="Authentication events (auth.log, wtmp/btmp, last/lastb) + lateral movement + by-source-IP aggregation">Logons</button>
         <button class="btn" id="tabSsh" data-tab="ssh" title="SSH key inventory: authorized_keys (inbound access), per-user identity keys, and host keys - with options, comments and null-passphrase flags (v1.1)">SSH Keys</button>
         <button class="btn" id="tabPersist" data-tab="persist" title="Scored persistence command lines + the persistence/config file inventory (v0.13)">Persistence</button>
+        <button class="btn" id="tabActions" data-tab="actions" title="Executed shell commands from per-user bash/zsh/sh history, timestamped where HISTTIMEFORMAT/zsh extended-history is set, scored (v1.2)">Actions</button>
         <button class="btn" id="tabEvents" data-tab="events" title="One time-sorted axis merging logons, packages, boots, journal anomalies, web, audit and history events; click a timestamp to pivot the Timeline">Events</button>
         <button class="btn" id="tabTime" data-tab="time" title="Filesystem timeline from the bodyfile (mtime/atime/ctime/crtime), scored; the pivot ±15 min target">Timeline</button>
         <button class="btn" id="tabWeb" data-tab="web" title="Web-server access logs (apache/nginx/httpd combined format) - initial-access hunting">Apache logs</button>
         <button class="btn" id="tabAudit" data-tab="audit" title="auditd execve + login records when audit.log is in the capture (v0.11)">Audit</button>
-        <button class="btn" id="tabActions" data-tab="actions" title="Executed shell commands from per-user bash/zsh/sh history, timestamped where HISTTIMEFORMAT/zsh extended-history is set, scored (v1.2)">Actions</button>
-        <button class="btn" id="tabLogs" data-tab="logs" title="Log integrity, journal rotation analysis, syslog service inventory, notable events, WSL journal ingestion">Logs</button>
+        <button class="btn" id="tabLogs" data-tab="logs" title="Log integrity, journal rotation analysis, syslog service inventory, notable events, WSL journal ingestion">Log Integrity</button>
         <button class="btn" id="tabIoc" data-tab="ioc" title="Tree-wide IOC/keyword sweep hits + dormant SHA1 matches from hash_executables">IOC hits</button>
       </div>
     </div>
@@ -223,8 +225,8 @@
     <!-- OVERVIEW -->
     <div class="card" id="ovCard">
       <span style="float:right">
-        <label style="font-size:12px;margin-right:10px" title="Render times in the collector's host time zone instead of UTC (applies everywhere)."><input type="checkbox" id="tzOv"> host TZ</label>
-        <button class="btn primary" id="reportBtn" title="Write a self-contained HTML report of everything parsed (all tabs, navigation pane, scored tables capped at the highest-signal rows) into the output folder and open it.">Generate report</button>
+        <label style="font-size:12px;margin-right:10px" title="Render times in the collector's host time zone instead of UTC (applies everywhere)."><input type="checkbox" id="tzOv"> Host TZ</label>
+        <button class="btn green" id="reportBtn" title="Write a self-contained HTML report of everything parsed (all tabs, navigation pane, scored tables capped at the highest-signal rows) into the output folder and open it.">Generate report</button>
       </span>
       <!-- v1.4: System overview first, then the sar / network / boots / cloud-init context blocks -->
       <h3 title="Run metadata parsed from uac.log, the per-dataset counts, and the highest-scoring findings across every dataset - the at-a-glance triage summary.">System Overview</h3>
@@ -265,7 +267,7 @@
           <option value="5">score &ge; 5</option>
           <option value="0">all (incl. benign)</option>
         </select>
-        <label style="font-size:12px;margin-left:10px" title="Render times in the collector's host time zone instead of UTC."><input type="checkbox" id="tzPersist"> host TZ</label>
+        <label style="font-size:12px;margin-left:10px" title="Render times in the collector's host time zone instead of UTC."><input type="checkbox" id="tzPersist"> Host TZ</label>
         <span class="muted" style="font-size:11px;margin-left:8px">cron / systemd units &amp; timers / authorized_keys / rc.local / ld.so.preload / accounts / suid &amp; capability sweeps / SSH keys / histories &amp; startup files / motd &amp; apt hooks / modprobe / XDG autostart / PAM modules</span>
       </div>
       <div id="persFindWrap" class="hide">
@@ -276,13 +278,13 @@
 
     <!-- APPS (v0.13: own tab; v0.16: Docker containers first, stacked full-width) -->
     <div class="card hide" id="appsCard">
-      <label style="font-size:12px;float:right" title="Render times in the collector's host time zone instead of UTC."><input type="checkbox" id="tzApps"> host TZ</label>
+      <label style="font-size:12px;float:right" title="Render times in the collector's host time zone instead of UTC."><input type="checkbox" id="tzApps"> Host TZ</label>
       <div id="ctrWrap">
         <h3>Docker containers <span class="muted" style="font-weight:400;text-transform:none">- running containers (docker/podman), deep-inspected: privileged / host namespaces / sensitive mounts / docker diff implants</span></h3>
         <div class="scroll" style="max-height:30vh"><table id="ctrTbl"></table></div>
       </div>
       <div id="pkgWrap" style="margin-top:14px">
-        <label style="font-size:12px;float:right" title="Show only dual-use tooling watchlist installs (nmap, socat, xmrig, ...) and IOC-matching packages."><input type="checkbox" id="pkgSusOnly"> suspicious only</label>
+        <label style="font-size:12px;float:right" title="Show only dual-use tooling watchlist installs (nmap, socat, xmrig, ...) and IOC-matching packages."><input type="checkbox" id="pkgSusOnly"> Suspicious Only</label>
         <h3>Recent package installs <span class="muted" style="font-weight:400;text-transform:none" id="pkgWinLbl"></span></h3>
         <div class="scroll" style="max-height:38vh"><table id="pkgTbl"></table></div>
       </div>
@@ -305,6 +307,7 @@
 
     <!-- EVENTS (v0.6: unified time-sorted scored timeline) -->
     <div class="card hide" id="eventsCard">
+      <div class="tblhead" title="One chronological, scored axis merging events from every dataset - the 'what happened around this time' view. Click a timestamp to pivot the Timeline ±15 min.">Events timeline<span class="d">One time-sorted, scored axis merging logons, package activity, boots, journal anomalies, web requests, audit records and timestamped shell history - click a timestamp to pivot the Timeline</span></div>
       <div class="row" style="margin-bottom:8px">
         <input class="txt" id="evq" placeholder="search events (kind, label, source…)" style="width:280px">
         <span class="sep"></span>
@@ -320,11 +323,11 @@
         </select>
         <span class="mdwrap" data-udrop="1"><button class="btn" id="evKindBtn" data-udrop="1" onclick="mdToggleBtn('evKind')">kind: all ▾</button><div id="evKindPanel" class="hide mdpanel" data-udrop="1"></div></span>
         <label style="font-size:12px" title="Show only the notable-event kinds (OOM kills, promiscuous mode, USB attach, module loads, /etc/hosts pins, cron/unit summaries, boots, journal rotation anomalies)."><input type="checkbox" id="evNotable"> Notable events only</label>
-        <label style="font-size:12px" title="Show only dual-use tooling package installs (nmap, tcpdump, socat, ...) - the fastest way to spot recently installed dual-use tools."><input type="checkbox" id="evToolOnly"> TOOLING only</label>
+        <label style="font-size:12px" title="Show only dual-use / offensive-tooling package installs (nmap, tcpdump, socat, ...) - the fastest way to spot recently installed dual-use tools."><input type="checkbox" id="evToolOnly"> Dual Use Apps</label>
         <span class="sep"></span>
-        <label style="font-size:12px"><input type="checkbox" id="evTz"> Show times in host TZ</label>
+        <label style="font-size:12px"><input type="checkbox" id="evTz"> Host TZ</label>
         <span class="sep"></span>
-        <button class="btn" id="evExport">Export &rarr; CSV</button>
+        <button class="btn violet" id="evExport">Export &rarr; CSV</button>
         <span class="muted" id="evCount" style="margin-left:8px"></span>
       </div>
       <div class="scroll" id="evScroll" style="max-height:64vh"><table id="evTbl"></table></div>
@@ -334,9 +337,9 @@
     <!-- LOGS (v0.4: journal coverage, syslog inventory, notable events, integrity, sar, cloud-init) -->
     <div class="card hide" id="logsCard">
       <div class="row" style="margin-bottom:8px">
-        <label style="font-size:12px" title="Show epoch-based times in the collector's local time zone (from uac.log) instead of UTC."><input type="checkbox" id="tzLogs"> show times in host TZ</label>
+        <label style="font-size:12px" title="Show epoch-based times in the collector's local time zone (from uac.log) instead of UTC."><input type="checkbox" id="tzLogs"> Host TZ</label>
         <span class="sep"></span>
-        <button class="btn" id="logsExport" title="Export the log-integrity findings + syslog service inventory to CSV.">Export &rarr; CSV</button>
+        <button class="btn violet" id="logsExport" title="Export the log-integrity findings + syslog service inventory to CSV.">Export &rarr; CSV</button>
         <button class="btn" id="loadJournal" title="Read systemd journal CONTENTS via WSL journalctl (needs WSL installed + binary journals in the capture). Adds sudo/sshd/unit/seccomp/audit events.">Load journal contents (WSL)</button>
         <span class="muted" id="logsHint" style="font-size:11px;margin-left:8px"></span>
       </div>
@@ -381,7 +384,7 @@
         <span class="sep"></span>
         <label style="font-size:12px" title="Show only rows scored suspicious (score ≥ 3)."><input type="checkbox" id="susOnly"> Flagged only</label>
         <span id="tzWrap" class="hide"><span class="sep"></span>
-          <label style="font-size:12px" title="Render epoch times in the collector's local time zone (from uac.log) instead of UTC."><input type="checkbox" id="tzMain"> Show times in host TZ</label></span>
+          <label style="font-size:12px" title="Render epoch times in the collector's local time zone (from uac.log) instead of UTC."><input type="checkbox" id="tzMain"> Host TZ</label></span>
         <span class="sep"></span>
         <button class="btn" id="clearBtn">Clear</button>
         <button class="btn violet" id="exportBtn">Export View &rarr; CSV</button>
@@ -408,7 +411,7 @@
 <script language="JScript">
 "use strict";
 
-var APP_VERSION = "1.4.0";
+var APP_VERSION = "1.4.1";
 /* v0.9.4 - SQLECmd wrapper: offer to DOWNLOAD instead of hunt for it (operator request):
    - if the wrapper isn't found anywhere, a hand-off now offers to download the latest
      SQLECmd-Wrapper.hta from GitHub into THIS app's folder (browse stays as the offline
@@ -4384,7 +4387,7 @@ function sarSummaryHtml(){
     +'<th title="% CPU in user space - sustained high values with no known workload = cryptominer tell">%usr</th>'
     +'<th title="% CPU idle during the interval">%idle</th></tr></thead><tbody>');
     for(var i=0;i<S.busy.length && i<20;i++){ var bz=S.busy[i];
-      H.push('<tr class="row-warn"><td class="mono first">'+esc(bz.date)+'</td><td class="mono">'+esc(bz.time)+'</td><td class="mono" style="text-align:right">'+bz.usr.toFixed(1)+'</td><td class="mono" style="text-align:right">'+bz.idle.toFixed(1)+'</td></tr>'); }
+      H.push('<tr class="row-warn"><td class="mono first">'+esc(bz.date)+'</td><td class="mono">'+esc(bz.time)+'</td><td class="mono">'+bz.usr.toFixed(1)+'</td><td class="mono">'+bz.idle.toFixed(1)+'</td></tr>'); }
     H.push('</tbody></table></div>'); }
   H.push('</div>');
   return H.join("");
@@ -6052,6 +6055,7 @@ window.onload=function(){ init(); try{ window.setTimeout(checkSelfUpdate,600); }
       <li><b>Inventory tab</b> - a map of every key artifact (processes, network, logons, accounts, persistence, system, filesystem, logs, containers) showing present/absent, size, and an <b>open folder</b> link that opens the raw file in Explorer. The Persistence &amp; config inventory on Overview has the same open-folder links; click an artifact name there to view its contents inline.</li>
       <li><b>UI (v0.7):</b> the Processes table has a <b>Name</b> column and a <b>Tree view</b> toggle (collapsible parent/child hierarchy - click ▸/▾ to fold, a row for detail). <b>Logons</b> has User / Source / Result filters and a clickable link to each raw source log. <b>Events</b> has a min-score filter and a kind filter. Long tables keep their <b>header row frozen</b> while scrolling, and <b>Persistence &amp; system findings</b> shows a date/time column.</li>
       <li><b>Resizable columns</b> everywhere - drag the right edge of any column header (it highlights on hover); double-click the edge to reset. Widths persist per view.</li>
+      <li><b>Presentation pass, cont. (v1.4.1):</b> Generate report is green; all Host-TZ toggles read "Host TZ"; the Events "TOOLING only" filter is now "Dual Use Apps"; the Events and Log-Integrity tabs got violet Export buttons; the Events tab gained a heading + description; the Logs tab is renamed "Log Integrity"; the Actions tab sits left of Events; and the sar %usr/%idle columns are left-aligned.</li>
       <li><b>Presentation pass (v1.4):</b> every table tab now shows a <b>heading and one-line description</b> above the grid; report files follow the convention <code>&lt;Hostname&gt; - Full|Filtered UAC Report - YYYYMMDD-HHMMSS</code> (UTC); the tab bar is reordered (Browser by Users, SSH Keys by Logons, Events before Timeline) and <b>Inventory</b> is now <b>UAC Inventory</b>; <b>System Overview</b> sits at the top of the Overview with sar/boots/cloud-init below it; the sar cards and the cloud-init section gained tooltips/descriptions; the Events <b>hide TOOLING</b> toggle became <b>TOOLING only</b> (spot recently installed dual-use tools directly); <b>Export View → CSV</b> and <b>Copy to Clipboard</b> are violet; and toolbar/heading capitalization was tidied up.</li>
       <li><b>Brute-force filter (v1.3):</b> a <b>brute-force only</b> checkbox on <b>Logons</b> and <b>Audit</b>. On Logons it shows the failures and the eventual success from any source IP with 5+ failed attempts (the SPRAY / BRUTEWIN picture), and on the <b>By source IP</b> view it narrows to just those brute sources. On Audit it shows failed <code>USER_AUTH</code>/<code>USER_LOGIN</code> records from a source that failed 5+ times. One click isolates a password-guessing campaign and the account/IP that eventually got in.</li>
       <li><b>Actions tab (v1.2):</b> the complete <b>executed-command history</b> - every line from each user's bash/zsh/sh history (not just the hostile ones the Persistence tab keeps), <b>timestamped</b> where the shell recorded times (bash <code>HISTTIMEFORMAT</code> "#epoch" lines, zsh extended-history), and scored with the command heuristics (IOC, temp-path exec, decoder/interactive shell, pipe-to-shell, URL fetch, anti-forensics, elevation). Per-user multiselect filter, case-window and host-TZ aware, click a timestamped row to <b>pivot the Timeline ±15 min</b>. Answers "what did they actually type on this box." Exports to CSV and appears in the report.</li>
