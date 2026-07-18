@@ -208,6 +208,7 @@
         <button class="btn" id="tabEvents" data-tab="events" title="One time-sorted axis merging logons, packages, boots, journal anomalies, web, audit and history events; click a timestamp to pivot the Timeline">Events</button>
         <button class="btn" id="tabWeb" data-tab="web" title="Web-server access logs (apache/nginx/httpd combined format) - initial-access hunting">Apache logs</button>
         <button class="btn" id="tabAudit" data-tab="audit" title="auditd execve + login records when audit.log is in the capture (v0.11)">Audit</button>
+        <button class="btn" id="tabActions" data-tab="actions" title="Executed shell commands from per-user bash/zsh/sh history, timestamped where HISTTIMEFORMAT/zsh extended-history is set, scored (v1.2)">Actions</button>
         <button class="btn" id="tabBrowser" data-tab="browser" title="Browser SQLite databases + the SQLECmd hand-off (v0.13)">Browser</button>
         <button class="btn" id="tabLogs" data-tab="logs" title="Log integrity, journal rotation analysis, syslog service inventory, notable events, WSL journal ingestion">Logs</button>
         <button class="btn" id="tabIoc" data-tab="ioc" title="Tree-wide IOC/keyword sweep hits + dormant SHA1 matches from hash_executables">IOC hits</button>
@@ -349,6 +350,8 @@
           <span class="mdwrap" data-udrop="1"><button class="btn" id="netTypeBtn" data-udrop="1" onclick="mdToggleBtn('netType')">type: all ▾</button><div id="netTypePanel" class="hide mdpanel" data-udrop="1"></div></span></span>
         <span id="procSusWrap" class="hide"><span class="sep"></span>
           <span class="mdwrap" data-udrop="1"><button class="btn" id="procSusBtn" data-udrop="1" onclick="mdToggleBtn('procSus')" title="Filter processes by suspicion category (scoring tag)">suspicion: all ▾</button><div id="procSusPanel" class="hide mdpanel" data-udrop="1"></div></span></span>
+        <span id="actFilters" class="hide"><span class="sep"></span>
+          <span class="mdwrap" data-udrop="1"><button class="btn" id="actUserBtn" data-udrop="1" onclick="mdToggleBtn('actUser')" title="Filter executed commands by the account whose history they came from">user: all ▾</button><div id="actUserPanel" class="hide mdpanel" data-udrop="1"></div></span></span>
         <span id="usersFilters" class="hide"><span class="sep"></span>
           <span style="position:relative;display:inline-block" data-udrop="1">
             <button class="btn" id="usersDropBtn" data-udrop="1" title="Multiselect account filter - tick the accounts to show. Nothing ticked = all accounts.">accounts: all ▾</button>
@@ -397,7 +400,7 @@
 <script language="JScript">
 "use strict";
 
-var APP_VERSION = "1.1.0";
+var APP_VERSION = "1.2.0";
 /* v0.9.4 - SQLECmd wrapper: offer to DOWNLOAD instead of hunt for it (operator request):
    - if the wrapper isn't found anywhere, a hand-off now offers to download the latest
      SQLECmd-Wrapper.hta from GitHub into THIS app's folder (browse stays as the offline
@@ -581,7 +584,7 @@ var HIDDENPIDS = {};                  // pid -> 1
 var PROCSCORE = {};                   // pid -> score (for network SUSPROC)
 var SORT = { proc:{k:0,d:-1}, net:{k:0,d:-1}, logon:{k:0,d:-1}, time:{k:1,d:-1}, ioc:{k:0,d:1},
              web:{k:1,d:-1}, users:{k:1,d:1}, audit:{k:1,d:-1}, logonip:{k:5,d:-1},
-             groups:{k:3,d:-1}, ssh:{k:0,d:-1} };   // v0.11 / v0.17 / v1.1
+             groups:{k:3,d:-1}, ssh:{k:0,d:-1}, actions:{k:1,d:-1} };   // v0.11 / v0.17 / v1.1 / v1.2
 /* v0.8 datasets (browser DBs -> SQLECmd hand-off) */
 var BROWSERDBS = [];                  // detected browser SQLite DBs under user profiles
 var BDB_COMMON = "";                  // deepest common folder of all hits (analyze-all input)
@@ -1219,6 +1222,7 @@ function parseCapture(root, input){
       ["ssh key findings",           function(){ parseSshFindings(root); }],
       ["ssh key inventory",          function(){ parseSshKeys(root); }],
       ["shell histories",            function(){ parseHistories(root); }],
+      ["actions (command history)",  function(){ parseActions(root); }],
       ["/proc/net decode",           function(){ parseProcNet(root); }],
       ["auditd summary",             function(){ parseAudit(root); }],
       ["config drift",               function(){ parseConfigDrift(root); }],
@@ -2849,6 +2853,57 @@ function privKeyEncrypted(path){ var ls=privKeyFirst(path); var h=ls.join("\n");
   return null;
 }
 
+/* ---- v1.2: Actions - the full executed-command history (every shell line, not just hostile) ----
+   The persistence "history" findings keep ONLY scored hostile one-liners. The Actions tab is the
+   complete typed-command record per user: bash/zsh/sh histories, with timestamps where the shell
+   was configured to record them (bash HISTTIMEFORMAT -> "#<epoch>" lines; zsh EXTENDED_HISTORY ->
+   ": <epoch>:<dur>;<cmd>"). Each line is scored with the same command heuristics. */
+var ACTIONS=[], ACTIONS_CAP=25000, ACTIONSCAP={shown:0,total:0};
+function scoreActionRow(r){
+  r.tags=[]; r.reasons=[]; r.score=0;
+  var c=lc(r.cmd), h=iocHit(r.blob);
+  if(h){ r.score+=3; r.tags.push("IOC"); r.reasons.push("IOC/keyword hit: "+h); }
+  if(underTmp(r.cmd)){ r.score+=2; r.tags.push("TMPEXEC"); r.reasons.push("references a temp/ram path"); }
+  if(isShellCmd(r.cmd)){ r.score+=2; r.tags.push("SHELLCMD"); r.reasons.push("interactive/decoder shell one-liner"); }
+  else if(/\|\s*(ba|z)?sh\b/.test(c)){ r.score+=2; r.tags.push("PIPE-SH"); r.reasons.push("pipes streamed content into a shell"); }
+  if(/\b(curl|wget)\b/.test(c) && /https?:\/\//.test(c)){ r.score+=1; r.tags.push("NET-FETCH"); r.reasons.push("fetches from a URL"); }
+  if(/history\s+-c|unset\s+histfile|shred\b|>\s*\/var\/log|chattr\s+[+]i/.test(c)){ r.score+=2; r.tags.push("ANTIFOR"); r.reasons.push("anti-forensics command"); }
+  if(/(^|\s)(sudo|pkexec)\s/.test(c) || /^su\b/.test(c)){ if(!hasTag(r,"SHELLCMD")){ r.tags.push("ELEVATE"); r.reasons.push("privilege-elevation command"); } }
+}
+function pushAction(user, shell, ep, cmd){
+  var r={ kind:"action", user:user, shell:shell, epoch:ep||0, cmd:cmd, src:shell+" ("+user+")" };
+  r.blob=lc(cmd+" "+user);
+  scoreActionRow(r);
+  ACTIONS.push(r);
+}
+function parseActions(root){
+  ACTIONS=[]; ACTIONSCAP={shown:0,total:0};
+  var specs=[[".bash_history","bash"],[".zsh_history","zsh"],[".sh_history","sh"],[".ash_history","ash"],[".histfile","shell"],[".local/share/qgis/qgis3/console/console_history.py","python"]];
+  // resolve per-user history files (findUserFiles walks [root]/root + each [root]/home/<user>)
+  var i, j;
+  for(j=0;j<specs.length;j++){
+    if(specs[j][1]==="python") continue;   // keep Actions bash-focused; python REPL stays in persistence
+    var files=findUserFiles(root, specs[j][0]);
+    for(i=0;i<files.length;i++){
+      var user=userLabel(files[i]), ls=readLines(files[i]), pend=0, k;
+      for(k=0;k<ls.length;k++){ var ln=ls[k];
+        // bash HISTTIMEFORMAT timestamp line
+        var tm=ln.match(/^#(\d{9,10})$/); if(tm){ pend=parseInt(tm[1],10); continue; }
+        // zsh extended-history inline form ": <epoch>:<dur>;<command>"
+        var zm=ln.match(/^:\s*(\d{9,10}):\d+;([\s\S]*)$/); var ep=0, cmd;
+        if(zm){ ep=parseInt(zm[1],10); cmd=trimStr(zm[2]); }
+        else { cmd=trimStr(ln); ep=pend; pend=0; }
+        if(cmd===""||cmd.charAt(0)==="#") continue;
+        ACTIONSCAP.total++;
+        if(ACTIONS.length>=ACTIONS_CAP) continue;
+        pushAction(user, specs[j][1], ep, cmd);
+      }
+    }
+  }
+  ACTIONSCAP.shown=ACTIONS.length;
+  if(ACTIONSCAP.total) appendLog("Actions: "+nf(ACTIONSCAP.total)+" shell command(s) parsed from history"+(ACTIONSCAP.total>ACTIONSCAP.shown?(" ("+nf(ACTIONSCAP.shown)+" stored - cap)"):"")+".");
+}
+
 /* ---- shell histories: score hostile one-liners (recon, download-exec, anti-forensics) ---- */
 var HIST_PREFILTER=/\b(nc|ncat|socat|curl|wget|base64|chmod\s+\+x|useradd|usermod|passwd|ssh-keygen|scp|tcpdump|nmap|masscan|chattr|setcap)\b|\/dev\/tcp\/|\|\s*(ba|z)?sh\b|python[0-9.]*\s+-c|perl\s+-e|history\s+-c|unset\s+HISTFILE|shred\b|>\s*\/var\/log/i;
 function histScoreLine(src, user, ln, ep){
@@ -3392,6 +3447,8 @@ function rescoreAll(){
       if(!r.restricted){ r.tags.push("UNRESTRICTED"); r.reasons.push("no from=/restrict source restriction on this authorized_keys entry"); }
     }
   }
+  // v1.2: re-score Actions rows (IOC list may have changed)
+  for(i=0;i<ACTIONS.length;i++){ scoreActionRow(ACTIONS[i]); }
   // v0.2 datasets: logons (own pre-pass rescore), persistence findings, containers all re-score
   // against the current IOC list. hash_executables dormant hits are re-run in the sweep, not here.
   scoreLogons();
@@ -4005,6 +4062,31 @@ function renderSshKeys(){
     if(s.kind==="authorized_keys") ak++; else if(s.priv) pk++; if(/^host key/.test(s.kind)) hk++; if(s.priv&&s.nullpass===true) nullc++; }
   $("count").innerHTML+=" · "+nf(ak)+" authorized-key entr"+(ak===1?"y":"ies")+", "+nf(pk)+" private key"+(pk===1?"":"s")+(nullc?(' <span class="tag sus">'+nullc+' with NO passphrase</span>'):"")+", "+nf(hk)+" host key"+(hk===1?"":"s");
 }
+/* v1.2: Actions - executed shell-command history */
+var NCMDCOLS=[
+  {h:"Score / tags", tip:"Suspicion score plus tags - hover a tag for reasons (IOC, TMPEXEC, SHELLCMD, PIPE-SH, NET-FETCH, ANTIFOR, ELEVATE)", sk:function(r){return r.score;}, cell:function(r){return scoreCell(r);}},
+  {h:"When", tip:"Command time when the shell recorded one (bash HISTTIMEFORMAT / zsh extended history) - '-' means the history file carried no timestamps; obeys the host-TZ toggle", sk:function(r){return r.epoch;}, cell:function(r){return '<td class="mono">'+esc(r.epoch?fmtTime(r.epoch,true):"-")+'</td>';}},
+  {h:"User", tip:"Account whose shell history this command came from", sk:function(r){return lc(r.user);}, cell:function(r){return '<td class="mono">'+esc(r.user)+'</td>';}},
+  {h:"Shell", tip:"Which history file (bash / zsh / sh / ash)", sk:function(r){return r.shell;}, cell:function(r){return '<td class="mono muted">'+esc(r.shell)+'</td>';}},
+  {h:"Command", tip:"The command line as typed (history order preserved; sort by When for chronological)", sk:function(r){return lc(r.cmd);}, cell:function(r){return '<td class="mono" title="'+esc(r.cmd)+'">'+esc(trunc(r.cmd,200))+'</td>';}}
+];
+function renderActions(){
+  // user multiselect (with per-user command counts)
+  var uc={}, i; for(i=0;i<ACTIONS.length;i++){ uc[ACTIONS[i].user]=(uc[ACTIONS[i].user]||0)+1; }
+  mdPopulate("actUser", uc);
+  var rows=[]; for(i=0;i<ACTIONS.length;i++){ var r=ACTIONS[i];
+    if(!passQ(r)) continue;
+    if(!mdPass("actUser", r.user)) continue;
+    if((DFROM||DTO) && r.epoch && !inDay(logonDay(r.epoch))) continue;   // case window (only affects timestamped rows)
+    rows.push(r); }
+  sortRows(rows,NCMDCOLS,SORT.actions); drawTable(NCMDCOLS,rows,SORT.actions,"actions");
+  if(!ACTIONS.length){
+    $("tbl").innerHTML='<thead><tr><th>Actions</th></tr></thead><tbody><tr><td class="muted">No shell command history in this capture - looked for per-user ~/.bash_history, ~/.zsh_history, ~/.sh_history, ~/.ash_history. A logs-only collection, a freshly-provisioned host, or accounts with HISTFILE disabled produce none. Anti-forensics (history -c / unset HISTFILE) also empties them - check the Persistence tab for that tell.</td></tr></tbody>';
+    $("count").innerHTML="0 rows"; return; }
+  var withTs=0; for(i=0;i<ACTIONS.length;i++){ if(ACTIONS[i].epoch) withTs++; }
+  $("count").innerHTML+=" · "+nf(withTs)+" timestamped"+(withTs===0?" (shells recorded no HISTTIMEFORMAT - order preserved, absolute times unknown)":"")
+    +(ACTIONSCAP.total>ACTIONSCAP.shown?(' · <span class="tag sus">capped: '+nf(ACTIONSCAP.shown)+' of '+nf(ACTIONSCAP.total)+'</span>'):"");
+}
 /* Logons by-source-IP aggregation - the brute-force triage view */
 function buildLogonByIp(src){
   var arr=src||LOGON;   // v0.14: optional source array so the filtered report can aggregate a subset
@@ -4057,15 +4139,16 @@ function renderLateral(){
 /* ---------- tab / render dispatch ---------- */
 function setTab(t, quiet){
   TAB=t;
-  var ids={overview:"tabOverview",inv:"tabInv",proc:"tabProc",net:"tabNet",logon:"tabLogon",users:"tabUsers",ssh:"tabSsh",persist:"tabPersist",time:"tabTime",events:"tabEvents",web:"tabWeb",audit:"tabAudit",apps:"tabApps",browser:"tabBrowser",logs:"tabLogs",ioc:"tabIoc"};
+  var ids={overview:"tabOverview",inv:"tabInv",proc:"tabProc",net:"tabNet",logon:"tabLogon",users:"tabUsers",ssh:"tabSsh",persist:"tabPersist",time:"tabTime",events:"tabEvents",web:"tabWeb",audit:"tabAudit",actions:"tabActions",apps:"tabApps",browser:"tabBrowser",logs:"tabLogs",ioc:"tabIoc"};
   for(var k in ids){ if(ids.hasOwnProperty(k)){ $(ids[k]).className=(k===t)?"btn on":"btn"; } }
   var isOv=(t==="overview"), isLogs=(t==="logs"), isEv=(t==="events");
   var isPersist=(t==="persist"), isApps=(t==="apps"), isBrowser=(t==="browser");
   showEl("ovCard",isOv); showEl("logsCard",isLogs); showEl("eventsCard",isEv);
   showEl("persistCard",isPersist); showEl("appsCard",isApps); showEl("browserCard",isBrowser);
   showEl("tblCard", !isOv && !isLogs && !isEv && !isPersist && !isApps && !isBrowser);
-  showEl("dateWrap", t==="time" || t==="logon" || t==="web" || t==="audit");
-  showEl("tzWrap", t==="time" || t==="logon" || t==="web" || t==="audit" || t==="users");   // v0.16: Users has last-login times
+  showEl("dateWrap", t==="time" || t==="logon" || t==="web" || t==="audit" || t==="actions");
+  showEl("tzWrap", t==="time" || t==="logon" || t==="web" || t==="audit" || t==="users" || t==="actions");   // v0.16: Users has last-login times; v1.2: Actions has command times
+  showEl("actFilters", t==="actions");   // v1.2
   showEl("procTreeWrap", t==="proc");
   showEl("procSusWrap", t==="proc");                         // v0.16
   showEl("logonFilters", t==="logon");
@@ -4090,6 +4173,7 @@ function render(){
   else if(TAB==="web") renderWeb();
   else if(TAB==="audit") renderAudit();
   else if(TAB==="ssh") renderSshKeys();
+  else if(TAB==="actions") renderActions();
   else if(TAB==="ioc") renderIoc();
   else if(TAB==="inv") renderInventory();
 }
@@ -5047,6 +5131,16 @@ function openRowDetail(idx){
     h+=detField("Shell-history lines", nf(r.hist));
     h+=detField("Last login", r.lastEp?(fmtTime(r.lastEp,true)+" "+tzLabel()+(r.lastIp?(" from "+r.lastIp):"")):"(none recorded)");
     h+='</div>';
+  } else if(TAB==="actions"){
+    h+='<div style="font-size:14px;margin-bottom:6px"><b>'+esc(r.user)+' <span class="muted">('+esc(r.shell)+')</span></b> '+tagsHtml(r)+'</div>';
+    h+=reasonsBlock(r);
+    h+='<div class="dl">';
+    h+=detField("When ("+tzLabel()+")", r.epoch?fmtTime(r.epoch,true):"(no timestamp in history - order only)");
+    h+=detField("User", r.user);
+    h+=detField("Shell history", r.shell);
+    h+='</div>';
+    h+='<div class="dl"><span class="kv">Command:</span><br><span class="mono" style="white-space:pre-wrap;word-break:break-all">'+esc(r.cmd)+'</span></div>';
+    if(r.epoch) h+='<div class="dl"><span class="lnk" onclick="pivotTimeline('+r.epoch+')" title="What changed on disk around this command?">Open Timeline ±15 min around this command</span></div>';
   } else if(TAB==="ssh"){
     h+='<div style="font-size:14px;margin-bottom:6px"><b>'+esc(r.kind+" - "+r.scope)+'</b> '+tagsHtml(r)+'</div>';
     h+=reasonsBlock(r);
@@ -5210,6 +5304,9 @@ function exportView(){
   else if(TAB==="audit"){ head=["Score","Tags","When_"+tzLabel(),"Type","User","SourceIP","Result","Detail","AuditId"]; lines=[head.join(",")];
     for(var xi=0;xi<rows.length;xi++){ var xr=rows[xi];
       lines.push([cq(xr.score),cq(xr.tags.join(";")),cq(xr.epoch?fmtTime(xr.epoch,true):""),cq(xr.typ),cq(xr.user),cq(xr.ip),cq(xr.res),cq(xr.detail),cq(xr.id)].join(",")); } }
+  else if(TAB==="actions"){ head=["Score","Tags","When_"+tzLabel(),"Epoch","User","Shell","Command"]; lines=[head.join(",")];
+    for(var ai2=0;ai2<rows.length;ai2++){ var ar=rows[ai2];
+      lines.push([cq(ar.score),cq(ar.tags.join(";")),cq(ar.epoch?fmtTime(ar.epoch,true):""),cq(ar.epoch||""),cq(ar.user),cq(ar.shell),cq(ar.cmd)].join(",")); } }
   else if(TAB==="ssh"){ head=["Score","Tags","Kind","Scope","Algorithm","Comment","KeyId","Restricted","ForcedCommand","Passphrase","Options","File","KeyMaterial"]; lines=[head.join(",")];
     for(var ki=0;ki<rows.length;ki++){ var kr=rows[ki]; var pp=kr.priv?(kr.nullpass===true?"none":(kr.encrypted===true?"encrypted":"unknown")):"";
       lines.push([cq(kr.score),cq(kr.tags.join(";")),cq(kr.kind),cq(kr.scope),cq(kr.algo),cq(kr.comment),cq(kr.id),cq(kr.kind==="authorized_keys"?(kr.restricted?"yes":"no"):""),cq(kr.forced),cq(pp),cq(kr.options),cq(kr.file),cq(kr.blob)].join(",")); } }
@@ -5260,6 +5357,7 @@ function copyNotes(){
     else if(TAB==="web") out.push(r.score+" | "+(r.epoch?fmtTime(r.epoch,true):"-")+" | "+r.ip+" | "+r.method+" "+r.status+" | "+r.uri+(r.tags.length?(" | "+r.tags.join(",")):""));
     else if(TAB==="audit") out.push(r.score+" | "+fmtTime(r.epoch,true)+" | "+r.typ+" | "+r.user+" | "+r.detail+(r.tags.length?(" | "+r.tags.join(",")):""));
     else if(TAB==="ssh") out.push(r.score+" | "+r.kind+" | "+r.scope+" | "+r.algo+(r.comment?(" | "+r.comment):"")+(r.priv?(" | passphrase:"+(r.nullpass===true?"NONE":(r.encrypted===true?"encrypted":"unknown"))):(r.kind==="authorized_keys"?(" | "+(r.restricted?"restricted":"unrestricted")+(r.forced?(" forced:"+r.forced):"")):""))+(r.tags.length?(" | "+r.tags.join(",")):""));
+    else if(TAB==="actions") out.push(r.score+" | "+(r.epoch?fmtTime(r.epoch,true):"-")+" | "+r.user+" | "+r.cmd+(r.tags.length?(" | "+r.tags.join(",")):""));
   }
   try{ window.clipboardData.setData("Text", out.join("\r\n")); setStatus("Copied "+out.length+" lines to clipboard","ok"); }
   catch(e){ setStatus("Copy failed: "+e.message,"err"); }
@@ -5468,6 +5566,7 @@ function activeFilterDesc(){
     if($("evNotable").checked) f.push("notable events only");
     if($("evHideTool").checked) f.push("TOOLING hidden"); }catch(e3){}
   if(mdSet("evKind")) f.push("events kind in ["+mdDesc("evKind")+"]");
+  if(mdSet("actUser")) f.push("actions user in ["+mdDesc("actUser")+"]");
   if(EVQ) f.push('events search "'+EVQ+'"');
   if(EVFROM||EVTO) f.push("events window");
   if(PIVOT) f.push("timeline pivot ±15 min @ "+fmtTime(PIVOT.center,true));
@@ -5484,7 +5583,7 @@ function generateReport(){
     }
     setStatus("Generating "+(useFilters?"FILTERED":"full")+" HTML report…","muted");
     function F(arr){ if(!useFilters) return arr; var a=[],i9; for(i9=0;i9<arr.length;i9++){ if(passQ(arr[i9])) a.push(arr[i9]); } return a; }
-    var _P=F(PROC), _T=F(TIMEL), _W=F(WEBLOG), _A=F(AUDITX), _PF=F(PERSFIND), _K=F(PKGS), _C=F(CONTAINERS), _LA=F(LATERAL), _E=EVENTS, _N=F(NET), _L=F(LOGON), _U=F(USERS);
+    var _P=F(PROC), _T=F(TIMEL), _W=F(WEBLOG), _A=F(AUDITX), _PF=F(PERSFIND), _K=F(PKGS), _C=F(CONTAINERS), _LA=F(LATERAL), _E=EVENTS, _N=F(NET), _L=F(LOGON), _U=F(USERS), _AC=F(ACTIONS);
     if(useFilters){
       var b1=[],i7,r7;
       var pub=false; try{ pub=$("netPubOnly").checked; }catch(en2){}
@@ -5493,6 +5592,9 @@ function generateReport(){
         if(!mdPass("netLoc", netLocOf(r7))) continue;
         if(!mdPass("netType", netSvcOf(r7))) continue; b1.push(r7); } _N=b1; }
       if(mdSet("procSus")){ b1=[]; for(i7=0;i7<_P.length;i7++){ if(mdPassAny("procSus",_P[i7].tags||[])) b1.push(_P[i7]); } _P=b1; }
+      if(mdSet("actUser")||(DFROM||DTO)){ b1=[]; for(i7=0;i7<_AC.length;i7++){ var ar7=_AC[i7];
+        if(!mdPass("actUser", ar7.user)) continue;
+        if((DFROM||DTO) && ar7.epoch && !inDay(logonDay(ar7.epoch))) continue; b1.push(ar7); } _AC=b1; }
       b1=[]; for(i7=0;i7<_L.length;i7++){ r7=_L[i7];
         if(!mdPass("logfUser", trimStr(r7.user))) continue;
         if(!mdPass("logfSrc", logonSrcType(r7))) continue;
@@ -5615,6 +5717,10 @@ function generateReport(){
     // --- Audit ---
     section("audit","Audit", repTable(["Score","When","Type","User","Source IP","Detail"],
       repRows(_A, REPORT_ROWCAP, function(r){ return {cls:repCls(r.score), cells:[repScore(r), fmtTime(r.epoch,true), r.typ, r.user, r.ip, trunc(r.detail,160)]}; }, true)));
+    // --- Actions ---
+    section("actions","Actions", repTable(["Score","When ("+tzLabel()+")","User","Shell","Command"],
+      repRows(_AC, REPORT_ROWCAP, function(r){ return {cls:repCls(r.score), cells:[repScore(r), r.epoch?fmtTime(r.epoch,true):"-", r.user, r.shell, trunc(r.cmd,200)]}; }, true),
+      ACTIONSCAP.total?("Executed shell commands from user history ("+nf(ACTIONSCAP.total)+" parsed"+(ACTIONSCAP.total>ACTIONSCAP.shown?(", "+nf(ACTIONSCAP.shown)+" stored"):"")+"; highest-signal shown here)."):""));
     // --- Apps ---
     var ap=[];
     ap.push('<h3>Recent package activity</h3>'+repTable(["When","Action","Package","Requested by"],
@@ -5730,7 +5836,7 @@ function init(){
   $("evMinScore").onchange=function(){ render(); };
   // v0.17: register the multiselect filters (labels drive the button text)
   mdReg("netLoc","location"); mdReg("netType","type"); mdReg("logfUser","user");
-  mdReg("logfSrc","source"); mdReg("logfResult","result"); mdReg("procSus","suspicion"); mdReg("evKind","kind");
+  mdReg("logfSrc","source"); mdReg("logfResult","result"); mdReg("procSus","suspicion"); mdReg("evKind","kind"); mdReg("actUser","user");
   $("evTz").onclick=function(){ setTz(this.checked); };
   $("evExport").onclick=exportEvents;
   $("evHideTool").onclick=function(){ render(); };
@@ -5815,7 +5921,7 @@ function init(){
     var pf=n.getAttribute("data-pf");
     if(pf!=null && pf!==""){ openPersistFile(parseInt(pf,10)); return; }
     var di=n.getAttribute("data-i");
-    if(di!=null && di!=="" && (TAB==="proc"||TAB==="net"||TAB==="logon"||TAB==="time"||TAB==="web"||TAB==="users"||TAB==="audit"||TAB==="ssh")){ var ix=parseInt(di,10); openRowDetail(ix);
+    if(di!=null && di!=="" && (TAB==="proc"||TAB==="net"||TAB==="logon"||TAB==="time"||TAB==="web"||TAB==="users"||TAB==="audit"||TAB==="ssh"||TAB==="actions")){ var ix=parseInt(di,10); openRowDetail(ix);
       var trs=$("tbl").getElementsByTagName("tr");
       for(var z=0;z<trs.length;z++){ var zi=trs[z].getAttribute("data-i");
         if(zi!=null&&zi!==""){ var rows=window.__viewRows||[]; var zr=rows[parseInt(zi,10)]; var base=zr?rowCls(zr):"";
@@ -5882,6 +5988,7 @@ window.onload=function(){ init(); try{ window.setTimeout(checkSelfUpdate,600); }
       <li><b>Inventory tab</b> - a map of every key artifact (processes, network, logons, accounts, persistence, system, filesystem, logs, containers) showing present/absent, size, and an <b>open folder</b> link that opens the raw file in Explorer. The Persistence &amp; config inventory on Overview has the same open-folder links; click an artifact name there to view its contents inline.</li>
       <li><b>UI (v0.7):</b> the Processes table has a <b>Name</b> column and a <b>Tree view</b> toggle (collapsible parent/child hierarchy - click ▸/▾ to fold, a row for detail). <b>Logons</b> has User / Source / Result filters and a clickable link to each raw source log. <b>Events</b> has a min-score filter and a kind filter. Long tables keep their <b>header row frozen</b> while scrolling, and <b>Persistence &amp; system findings</b> shows a date/time column.</li>
       <li><b>Resizable columns</b> everywhere - drag the right edge of any column header (it highlights on hover); double-click the edge to reset. Widths persist per view.</li>
+      <li><b>Actions tab (v1.2):</b> the complete <b>executed-command history</b> - every line from each user's bash/zsh/sh history (not just the hostile ones the Persistence tab keeps), <b>timestamped</b> where the shell recorded times (bash <code>HISTTIMEFORMAT</code> "#epoch" lines, zsh extended-history), and scored with the command heuristics (IOC, temp-path exec, decoder/interactive shell, pipe-to-shell, URL fetch, anti-forensics, elevation). Per-user multiselect filter, case-window and host-TZ aware, click a timestamped row to <b>pivot the Timeline ±15 min</b>. Answers "what did they actually type on this box." Exports to CSV and appears in the report.</li>
       <li><b>SSH Keys tab (v1.1):</b> a dedicated inventory of the key material in the capture - <b>authorized_keys</b> entries (who can log IN, with source-restriction and forced-command flags), per-user <b>identity keys</b> (id_* private/public, with passphrase state), and <b>host keys</b> from /etc/ssh. A short key-id (base64 head…tail) lets you match the same key across accounts by eye; a <b>null-passphrase private key</b> is flagged (usable as-is if exfiltrated), as is an <b>unrestricted</b> or <b>forced-command</b> authorized_keys entry. Exports to CSV and appears in the report.</li>
       <li><b>1.0 (2026-07-18):</b> the app is now the <b>Linux UAC Capture Analyzer</b> (file: <code>Linux-UAC-Analyzer.hta</code>, repo: <code>bpmorris22/Linux-UAC-Capture-Analyzer</code>) - the "Linux" in the name is honest scoping: binary utmp decode and several parsers are Linux-specific, and non-Linux captures degrade gracefully to text sources with integrity notes. Sidecar filenames (<code>UAC-Triage-Tool.sqlecmd.txt</code>/<code>.colw.txt</code>) and the <code>_Processed\&lt;host&gt;\UAC</code> output convention are unchanged for continuity. Everything from v0.10-v0.17 ships in this release.</li>
       <li><b>Multiselect release (v0.17):</b> <b>every set-type dropdown filter is now a checkbox multiselect</b> (network location + type, logon user/source/result, process suspicion, events kind - one shared component, counts per value, clear link, active filters highlight the button). Users gains an <b>Enabled column + enabled-only filter</b> (interactive shell AND usable password or SSH keys; "?" when shadow wasn't collected) and a <b>By group view</b> (every group with GID + member accounts; click a group for the full list; per-user memberships stay in the account detail pane). "Boots" renamed <b>Boot history</b>; Network addresses gains a <b>Link UP/DOWN</b> column; <b>Recent package installs</b> gains a suspicious-only filter; every tab button now carries a tooltip; <b>Copy to Clipboard</b> (renamed from "Copy for case notes" in v0.17.1) covers the Users/Apache/Audit/group views too; v0.17.1 also drops the redundant "Run metadata" heading under System overview.</li>

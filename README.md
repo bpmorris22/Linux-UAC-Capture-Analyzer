@@ -27,7 +27,7 @@ UAC is excellent at *collecting* a Unix-like host. This tool is about *reading t
 
 ## What it shows
 
-Sixteen tabs:
+Seventeen tabs:
 
 | Tab | Built from | Highlights |
 |---|---|---|
@@ -44,6 +44,7 @@ Sixteen tabs:
 | **Events** | all time-stamped datasets | One scored axis: logons, packages, boots, journal anomalies, web, audit, history; notable-events filter; click a timestamp to pivot the Timeline |
 | **Apache logs** | apache2/nginx/httpd access logs | Initial-access hunting: POSTs to scripts, traversal/encoded payloads, tool user-agents |
 | **Audit** | auditd | `execve` records (hex args decoded, auid attribution) + login events — the closest Linux gets to process-creation telemetry |
+| **Actions** | bash/zsh/sh history | The full **executed-command record** per user, timestamped where the shell recorded times, scored (temp-path exec, decoder/pipe-to-shell, URL fetch, anti-forensics, elevation); per-user filter, pivot to Timeline |
 | **Browser** | user-profile SQLite DBs | Hand-off to the SQLECmd wrapper (Zimmerman maps parse Linux-collected Chrome/Firefox DBs unchanged) |
 | **Logs** | journal filenames, syslog, kern.log, auditd summary | Log-integrity checks, journal rotation analysis, service inventory, notable events, optional **journal contents via WSL** |
 | **IOC hits** | tree sweep + `hash_executables` | Line-scan of the whole tree plus SHA1 matches against dormant on-disk executables |
