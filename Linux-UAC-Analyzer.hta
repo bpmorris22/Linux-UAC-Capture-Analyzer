@@ -402,7 +402,7 @@
 <script language="JScript">
 "use strict";
 
-var APP_VERSION = "1.3.0";
+var APP_VERSION = "1.3.1";
 /* v0.9.4 - SQLECmd wrapper: offer to DOWNLOAD instead of hunt for it (operator request):
    - if the wrapper isn't found anywhere, a hand-off now offers to download the latest
      SQLECmd-Wrapper.hta from GitHub into THIS app's folder (browse stays as the offline
@@ -3858,10 +3858,7 @@ function mdToggleBtn(key){ var p=$(key+"Panel"); if(!p) return; var wasHidden=/\
   mdCloseAll(key); showEl(key+"Panel", wasHidden); }
 function mdClearAll(){ for(var k in MDROP){ if(MDROP.hasOwnProperty(k)){ MDROP[k].sel={}; mdBtn(k); } } }
 
-/* ---- v1.1: SSH key inventory (Users tab "SSH keys" view) ----
-   Everything key-shaped the capture holds: per-user authorized_keys ENTRIES, public keys,
-   private keys (with encryption detection - see opensshCipher), known_hosts, client config,
-   plus /etc/ssh host keys. Non-root captures usually carry only public halves; a
+/* ---- v0.16: multiselect account dropdown (Users tab) ---- */
 var USERS_SEL={};
 function usersSelSet(){ var k; for(k in USERS_SEL){ if(USERS_SEL.hasOwnProperty(k)) return USERS_SEL; } return null; }
 function renderUsersDropBtn(){ var n=0,k; for(k in USERS_SEL){ if(USERS_SEL.hasOwnProperty(k)) n++; }
