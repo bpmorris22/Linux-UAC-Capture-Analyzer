@@ -213,11 +213,14 @@
 
     <!-- OVERVIEW -->
     <div class="card" id="ovCard">
-      <button class="btn primary" id="reportBtn" style="float:right" title="Write a self-contained HTML report of everything parsed (all tabs, navigation pane, scored tables capped at the highest-signal rows) into the output folder and open it.">Generate report</button>
+      <span style="float:right">
+        <label style="font-size:12px;margin-right:10px" title="Render times in the collector's host time zone instead of UTC (applies everywhere)."><input type="checkbox" id="tzOv"> host TZ</label>
+        <button class="btn primary" id="reportBtn" title="Write a self-contained HTML report of everything parsed (all tabs, navigation pane, scored tables capped at the highest-signal rows) into the output folder and open it.">Generate report</button>
+      </span>
       <!-- v0.13: sar CPU summary surfaced here (was buried on the Logs tab) - a sustained-CPU
            cryptominer tell should be visible the moment the capture opens -->
       <div id="ovSar"></div>
-      <h3>Capture overview</h3>
+      <h3>System overview</h3>
       <div class="cards3">
         <div class="col3">
           <h3>Run metadata</h3>
@@ -232,34 +235,46 @@
           <div id="ovTop" class="kvgrid"></div>
         </div>
       </div>
+      <!-- v0.16: network addresses sub-table (friendly adaptor labels; was kv rows in Run metadata) -->
+      <div id="ovNetAddr"></div>
       <!-- v0.14: boots table surfaced here (was on the Logs tab) - boot cadence is capture context -->
       <div id="ovBoots"></div>
       <!-- v0.15: cloud-init provisioning baseline (was on the Logs tab) - capture context too -->
       <div id="ovCloud"></div>
     </div>
 
-    <!-- PERSISTENCE (v0.13: own tab - was two sections on the Overview) -->
+    <!-- PERSISTENCE (v0.13: own tab; v0.16: inventory first, findings gain a score filter) -->
     <div class="card hide" id="persistCard">
-      <div id="persFindWrap" class="hide">
-        <h3>Persistence &amp; system findings <span class="muted" style="font-weight:400;text-transform:none">- cron / systemd units &amp; timers / authorized_keys / rc.local / ld.so.preload / accounts / suid &amp; capability sweeps / null-passphrase SSH keys / shell histories &amp; startup files / motd &amp; apt hooks / modprobe / XDG autostart / PAM modules, scored</span></h3>
-        <div class="scroll" style="max-height:40vh"><table id="pfTbl"></table></div>
+      <h3>Persistence &amp; config inventory <span class="muted" style="font-weight:400;text-transform:none">- click a present file to view its contents</span></h3>
+      <div class="scroll" style="max-height:38vh"><table id="pTbl" class="pgrid"></table></div>
+      <div class="row" style="margin-top:14px;margin-bottom:4px">
+        <h3 style="display:inline;margin-right:10px">Persistence &amp; system findings</h3>
+        <select id="pfMinScore" title="Minimum score for the findings below. 'all' includes the benign score-0 command lines (capped at 2,000 rows).">
+          <option value="1" selected>score &ge; 1</option>
+          <option value="2">score &ge; 2</option>
+          <option value="3">score &ge; 3</option>
+          <option value="5">score &ge; 5</option>
+          <option value="0">all (incl. benign)</option>
+        </select>
+        <label style="font-size:12px;margin-left:10px" title="Render times in the collector's host time zone instead of UTC."><input type="checkbox" id="tzPersist"> host TZ</label>
+        <span class="muted" style="font-size:11px;margin-left:8px">cron / systemd units &amp; timers / authorized_keys / rc.local / ld.so.preload / accounts / suid &amp; capability sweeps / SSH keys / histories &amp; startup files / motd &amp; apt hooks / modprobe / XDG autostart / PAM modules</span>
       </div>
-      <div id="persNone" class="ok hide" style="font-size:12px;margin-bottom:8px">No persistence command lines scored &ge; 1 in this capture (benign entries are parsed but hidden - the count shows in the inventory below).</div>
-      <h3 style="margin-top:14px">Persistence &amp; config inventory <span class="muted" style="font-weight:400;text-transform:none">- click a present file to view its contents</span></h3>
-      <div class="scroll" style="max-height:40vh"><table id="pTbl" class="pgrid"></table></div>
+      <div id="persFindWrap" class="hide">
+        <div class="scroll" style="max-height:42vh"><table id="pfTbl"></table></div>
+      </div>
+      <div id="persNone" class="ok hide" style="font-size:12px;margin-bottom:8px">No persistence command lines at this score threshold (benign entries are parsed but hidden - try "all" above).</div>
     </div>
 
-    <!-- APPS (v0.13: own tab - was two half-width sections on the Overview) -->
+    <!-- APPS (v0.13: own tab; v0.16: Docker containers first, stacked full-width) -->
     <div class="card hide" id="appsCard">
-      <div class="cards3">
-        <div class="col3" id="pkgWrap" style="width:49%">
-          <h3>Recent package installs <span class="muted" style="font-weight:400;text-transform:none" id="pkgWinLbl"></span></h3>
-          <div class="scroll" style="max-height:64vh"><table id="pkgTbl"></table></div>
-        </div>
-        <div class="col3" id="ctrWrap" style="width:49%">
-          <h3>Containers</h3>
-          <div class="scroll" style="max-height:64vh"><table id="ctrTbl"></table></div>
-        </div>
+      <label style="font-size:12px;float:right" title="Render times in the collector's host time zone instead of UTC."><input type="checkbox" id="tzApps"> host TZ</label>
+      <div id="ctrWrap">
+        <h3>Docker containers <span class="muted" style="font-weight:400;text-transform:none">- running containers (docker/podman), deep-inspected: privileged / host namespaces / sensitive mounts / docker diff implants</span></h3>
+        <div class="scroll" style="max-height:30vh"><table id="ctrTbl"></table></div>
+      </div>
+      <div id="pkgWrap" style="margin-top:14px">
+        <h3>Recent package installs <span class="muted" style="font-weight:400;text-transform:none" id="pkgWinLbl"></span></h3>
+        <div class="scroll" style="max-height:38vh"><table id="pkgTbl"></table></div>
       </div>
       <div id="appsNone" class="muted hide" style="font-size:12px">No package-manager activity logs and no container runtimes in this capture.</div>
     </div>
@@ -326,9 +341,15 @@
           <button class="btn" id="procTreeBtn" title="Toggle between the flat process table and a collapsible parent/child tree.">Tree view</button></span>
         <span id="netFilters" class="hide"><span class="sep"></span>
           <label style="font-size:12px" title="Show only rows whose REMOTE address is a public (non-RFC1918/loopback/link-local) IP - the outbound/inbound internet traffic."><input type="checkbox" id="netPubOnly"> public IPs only</label>
-          <select id="netLocSel" title="Filter by resolved country of the remote address (needs online geo/ASN lookups; '(unresolved)' = public IP with no geo data)"><option value="">location: all</option></select></span>
+          <select id="netLocSel" title="Filter by resolved country of the remote address (needs online geo/ASN lookups; '(unresolved)' = public IP with no geo data)"><option value="">location: all</option></select>
+          <select id="netTypeSel" title="Filter by service type derived from well-known ports (SSH, HTTP, SMB, RDP, ...)"><option value="">type: all</option></select></span>
+        <span id="procSusWrap" class="hide"><span class="sep"></span>
+          <select id="procSusSel" title="Filter processes by suspicion category (the scoring tag): IOC hits, deleted binaries, hidden PIDs, web shells, memfd, temp-path execution, ... Counts shown per category."><option value="">suspicion: all</option></select></span>
         <span id="usersFilters" class="hide"><span class="sep"></span>
-          <select id="usersSel" multiple size="3" style="vertical-align:middle;min-width:140px" title="Show only the selected accounts (Ctrl-click for multiple). Nothing selected = all accounts."></select>
+          <span style="position:relative;display:inline-block" data-udrop="1">
+            <button class="btn" id="usersDropBtn" data-udrop="1" title="Multiselect account filter - tick the accounts to show. Nothing ticked = all accounts.">accounts: all ▾</button>
+            <div id="usersDropPanel" class="hide" data-udrop="1" style="position:absolute;top:105%;left:0;z-index:80;background:#161b22;border:1px solid #30363d;border-radius:6px;padding:6px 10px;max-height:220px;overflow:auto;min-width:170px;text-align:left"></div>
+          </span>
           <span class="lnk" id="usersSelClear" style="font-size:11px" title="Clear the account selection">clear</span></span>
         <span id="logonFilters" class="hide"><span class="sep"></span>
           <select id="logfUser" title="Filter by user"><option value="">user: all</option></select>
@@ -370,7 +391,7 @@
 <script language="JScript">
 "use strict";
 
-var APP_VERSION = "0.15.0";
+var APP_VERSION = "0.16.0";
 /* v0.9.4 - SQLECmd wrapper: offer to DOWNLOAD instead of hunt for it (operator request):
    - if the wrapper isn't found anywhere, a hand-off now offers to download the latest
      SQLECmd-Wrapper.hta from GitHub into THIS app's folder (browse stays as the offline
@@ -3531,6 +3552,61 @@ function topTalkers(){
   return a.slice(0,5);
 }
 
+/* ---- v0.16: service-type from well-known ports (Network Type column + filter) ---- */
+var PORT_SVC={ "20":"FTP","21":"FTP","22":"SSH","23":"Telnet","25":"SMTP","53":"DNS","67":"DHCP","68":"DHCP",
+  "69":"TFTP","80":"HTTP","88":"Kerberos","110":"POP3","111":"RPC","123":"NTP","135":"MSRPC","137":"NetBIOS",
+  "138":"NetBIOS","139":"SMB","143":"IMAP","161":"SNMP","389":"LDAP","443":"HTTPS","445":"SMB","465":"SMTP",
+  "514":"Syslog","587":"SMTP","631":"IPP","636":"LDAPS","873":"rsync","993":"IMAPS","995":"POP3S",
+  "1433":"MSSQL","1521":"Oracle","2049":"NFS","2375":"Docker API","2376":"Docker API","3128":"Proxy",
+  "3306":"MySQL","3389":"RDP","5432":"PostgreSQL","5900":"VNC","5901":"VNC","5985":"WinRM","5986":"WinRM",
+  "6379":"Redis","8080":"HTTP","8443":"HTTPS","9200":"Elasticsearch","11211":"Memcached","27017":"MongoDB" };
+function netSvcOf(r){
+  if(r.state==="LISTEN"||r.state==="UNCONN") return PORT_SVC[String(r.localPort)]||"";
+  return PORT_SVC[String(r.peerPort)]||PORT_SVC[String(r.localPort)]||"";
+}
+/* v0.16: friendly adaptor labels for the Network addresses sub-table */
+function ifaceLabel(n){ n=lc(String(n||""));
+  if(/^(eth|en[ospx])/.test(n)) return "Ethernet";
+  if(/^(wl|wlan|wlp)/.test(n)) return "Wi-Fi";
+  if(/^docker/.test(n)) return "Docker bridge";
+  if(/^br-/.test(n)) return "Docker network bridge";
+  if(/^veth/.test(n)) return "Container link";
+  if(/^virbr/.test(n)) return "Virtual bridge (libvirt)";
+  if(/^(tun|tap|wg|tailscale|zt|ppp|ipsec)/.test(n)) return "VPN / tunnel";
+  if(/^bond/.test(n)) return "Bonded link";
+  if(/^(vmnet|vbox)/.test(n)) return "VM host adapter";
+  return "Network adaptor";
+}
+/* v0.16: Overview "Network addresses" sub-table (was kv rows inside Run metadata) */
+function netAddrHtml(){
+  if(!NETIDENT.length) return "";
+  var H=['<h3 style="margin-top:14px">Network addresses</h3><div class="scroll" style="max-height:14vh"><table><thead><tr>'
+    +'<th title="Friendly adaptor type derived from the interface name">Adaptor</th>'
+    +'<th title="Kernel interface name">Interface</th>'
+    +'<th title="Assigned IPv4/IPv6 addresses (loopback and link-local omitted)">IP address(es)</th>'
+    +'<th title="Hardware (MAC) address">MAC</th></tr></thead><tbody>'];
+  for(var i=0;i<NETIDENT.length && i<12;i++){ var n2=NETIDENT[i];
+    H.push('<tr><td>'+esc(ifaceLabel(n2.iface))+'</td><td class="mono">'+esc(n2.iface)+'</td>'
+      +'<td class="mono">'+esc(n2.ips.join(", ")||"-")+'</td><td class="mono muted">'+esc(n2.mac||"-")+'</td></tr>'); }
+  if(NETIDENT.length>12) H.push('<tr><td colspan="4" class="muted">+'+(NETIDENT.length-12)+' more interface(s) - see live_response/network/ip_addr.txt</td></tr>');
+  H.push('</tbody></table></div>');
+  return H.join("");
+}
+/* ---- v0.16: multiselect account dropdown (Users tab) ---- */
+var USERS_SEL={};
+function usersSelSet(){ var k; for(k in USERS_SEL){ if(USERS_SEL.hasOwnProperty(k)) return USERS_SEL; } return null; }
+function renderUsersDropBtn(){ var n=0,k; for(k in USERS_SEL){ if(USERS_SEL.hasOwnProperty(k)) n++; }
+  try{ $("usersDropBtn").innerHTML="accounts: "+(n?(n+" selected"):"all")+" ▾"; }catch(e){} }
+function populateUsersSel(){
+  var el=$("usersDropPanel"); if(!el) return;
+  var names=[], i; for(i=0;i<USERS.length;i++) names.push(USERS[i].user);
+  names.sort();
+  var h=[]; for(i=0;i<names.length;i++){
+    h.push('<label style="display:block;font-size:12px;white-space:nowrap;cursor:pointer"><input type="checkbox" data-usel="'+esc(names[i])+'"'+(USERS_SEL[names[i]]?" checked":"")+'> '+esc(names[i])+'</label>'); }
+  el.innerHTML=h.join("");
+  renderUsersDropBtn();
+}
+
 /* ---- pivot: anchor-and-expand from any timestamped row into the filesystem timeline ---- */
 function pivotTimeline(ep){
   ep=parseInt(ep,10)||0;
@@ -3635,20 +3711,8 @@ var UCOLS=[
   {h:"History", tip:"Shell-history line count across bash/zsh/sh/ash histories", sk:function(r){return r.hist;}, cell:function(r){return '<td class="mono" style="text-align:center">'+(r.hist?nf(r.hist):"-")+'</td>';}},
   {h:"Last login", tip:"Most recent login from the lastlog table (+source IP when remote)", sk:function(r){return r.lastEp;}, cell:function(r){return '<td class="mono">'+(r.lastEp?(esc(fmtTime(r.lastEp,false))+(r.lastIp?(" "+esc(r.lastIp)):"")):"-")+'</td>';}}
 ];
-/* v0.14: multiselect account filter - returns {} (no restriction) when nothing is selected */
-function usersSelSet(){
-  var set={}, any=false;
-  try{ var el=$("usersSel"); for(var i=0;i<el.options.length;i++){ if(el.options[i].selected){ set[el.options[i].value]=1; any=true; } } }catch(e){}
-  return any?set:null;
-}
-function populateUsersSel(){
-  var el=$("usersSel"); if(!el) return;
-  var cur=usersSelSet()||{};
-  var names=[]; for(var i=0;i<USERS.length;i++) names.push(USERS[i].user);
-  names.sort();
-  var h=[]; for(i=0;i<names.length;i++) h.push('<option value="'+esc(names[i])+'"'+(cur[names[i]]?" selected":"")+'>'+esc(names[i])+'</option>');
-  el.innerHTML=h.join("");
-}
+/* v0.16: the multiselect dropdown engine (USERS_SEL / usersSelSet / populateUsersSel) lives with
+   the other v0.16 helpers above the pivot section */
 function renderUsers(){
   populateUsersSel();
   var sel=usersSelSet();
@@ -3741,8 +3805,9 @@ function setTab(t, quiet){
   showEl("persistCard",isPersist); showEl("appsCard",isApps); showEl("browserCard",isBrowser);
   showEl("tblCard", !isOv && !isLogs && !isEv && !isPersist && !isApps && !isBrowser);
   showEl("dateWrap", t==="time" || t==="logon" || t==="web" || t==="audit");
-  showEl("tzWrap", t==="time" || t==="logon" || t==="web" || t==="audit");
+  showEl("tzWrap", t==="time" || t==="logon" || t==="web" || t==="audit" || t==="users");   // v0.16: Users has last-login times
   showEl("procTreeWrap", t==="proc");
+  showEl("procSusWrap", t==="proc");                         // v0.16
   showEl("logonFilters", t==="logon");
   showEl("netFilters", t==="net");
   showEl("usersFilters", t==="users");                       // v0.14
@@ -3780,6 +3845,8 @@ function renderOverview(){
   if(META.kernel) h+=kvRow("Kernel", META.kernel);            // v0.14: from uname -a
   h+=kvRow("UAC version", META.uacVer);
   h+=kvRow("Collected (host TZ)", META.started+(META.tz?("  "+META.tz):""));
+  // v0.16: explicit host time-zone row (name + UTC offset from uac.log)
+  if(META.tz||META.tzOffMin) h+=kvRow("Host time zone", (META.tz||"(unnamed)")+(META.tzOffMin?("  ·  UTC"+(META.tzOffMin<0?"-":"+")+p2n(Math.floor(Math.abs(META.tzOffMin)/60))+":"+p2n(Math.abs(META.tzOffMin)%60)):"  ·  UTC+0:00"));
   if(META.hostDate) h+=kvRow("Host clock at collection", META.hostDate);
   if(META.bootTime) h+=kvRow("Boot time", META.bootTime+" (host local)");
   if(META.uptime) h+=kvRow("Uptime", META.uptime+(META.loadAvg?("   load avg "+META.loadAvg):""));
@@ -3790,9 +3857,7 @@ function renderOverview(){
   // v0.15: activity window, network identity, analysis performance
   var aw=activityWindow();
   if(aw) h+=kvRow("Observable activity", fmtTime(aw.from,false)+" to "+fmtTime(aw.to,false)+" "+tzLabel()+" ("+nf(Math.max(1,Math.round((aw.to-aw.from)/86400)))+" days) - what /from /to can usefully cover");
-  for(var ni=0;ni<NETIDENT.length && ni<6;ni++){ var nid=NETIDENT[ni];
-    h+=kvRow("iface "+nid.iface, (nid.ips.join(", ")||"-")+(nid.mac?("  ·  "+nid.mac):"")); }
-  if(NETIDENT.length>6) h+=kvRow("ifaces", "+"+(NETIDENT.length-6)+" more (see live_response/network/ip_addr.txt)");
+  // v0.16: interface details moved to the "Network addresses" sub-table (ovNetAddr)
   if(PARSE_MS||EXTRACT_MS){ var pfF=0; for(var pf9=0;pf9<PERF.length;pf9++) if(PERF[pf9].err) pfF++;
     h+=kvRow("Analysis performance", (EXTRACT_MS?("extract "+fmtDur(EXTRACT_MS)+" + "):"")+"parse "+fmtDur(PARSE_MS)+(pfF?("  ·  "+pfF+" parser step(s) FAILED - see the log"):"")); }
   $("ovMeta").innerHTML=h;
@@ -3873,6 +3938,7 @@ function renderOverview(){
   // v0.13: persistence / packages / containers / browser DBs render on their own tabs now
   // v0.14: lateral movement renders on the Logons tab; boots render here
   $("ovSar").innerHTML=sarSummaryHtml();
+  $("ovNetAddr").innerHTML=netAddrHtml();   // v0.16
   $("ovBoots").innerHTML=bootsHtml();
   $("ovCloud").innerHTML=cloudInitHtml();   // v0.15
 }
@@ -3894,14 +3960,16 @@ function cloudInitHtml(){
 /* v0.14: journalctl --list-boots table (moved from the Logs tab - boot cadence is capture context) */
 function bootsHtml(){
   if(!BOOTS.length) return "";
-  var H=['<h3 style="margin-top:14px">Boots <span class="muted" style="font-weight:400;text-transform:none">- journalctl --list-boots, host local time; &gt;2-day between-boot gaps are flagged in Log integrity</span></h3>'];
+  var H=['<h3 style="margin-top:14px">Boots <span class="muted" style="font-weight:400;text-transform:none">- journalctl --list-boots; &gt;2-day between-boot gaps are flagged in Log integrity</span></h3>'];
   H.push('<div class="scroll" style="max-height:16vh"><table><thead><tr>'
     +'<th title="Boot index (0 = current boot, negative = earlier boots)">Idx</th>'
     +'<th title="journald boot id (truncated)">Boot ID</th>'
-    +'<th title="First journal entry of that boot (host local time)">First entry</th>'
-    +'<th title="Last journal entry of that boot (host local time)">Last entry</th></tr></thead><tbody>');
+    +'<th title="First journal entry of that boot (normalized; obeys the host-TZ toggle)">First entry ('+esc(tzLabel())+')</th>'
+    +'<th title="Last journal entry of that boot (normalized; obeys the host-TZ toggle)">Last entry ('+esc(tzLabel())+')</th></tr></thead><tbody>');
   for(var i=0;i<BOOTS.length;i++){ var bt=BOOTS[i];
-    H.push('<tr><td class="mono" style="text-align:right">'+esc(bt.idx)+'</td><td class="mono muted">'+esc(bt.id.substring(0,12))+'…</td><td class="mono">'+esc(bt.first)+'</td><td class="mono">'+esc(bt.last)+'</td></tr>'); }
+    H.push('<tr><td class="mono" style="text-align:right">'+esc(bt.idx)+'</td><td class="mono muted">'+esc(bt.id.substring(0,12))+'…</td>'
+      +'<td class="mono" title="raw: '+esc(bt.first)+'">'+esc(bt.firstEp?fmtTime(bt.firstEp,true):bt.first)+'</td>'
+      +'<td class="mono" title="raw: '+esc(bt.last)+'">'+esc(bt.lastEp?fmtTime(bt.lastEp,true):bt.last)+'</td></tr>'); }
   H.push('</tbody></table></div>');
   return H.join("");
 }
@@ -3925,10 +3993,11 @@ function sarSummaryHtml(){
 }
 /* v0.13: Persistence tab (scored findings + config inventory - both moved off the Overview) */
 function renderPersistTab(){
+  renderPersistGrid();   // v0.16: inventory renders first (top of the tab)
   renderPersFind();
-  var anyScored=false; for(var s2=0;s2<PERSFIND.length;s2++){ if(PERSFIND[s2].score>=1){ anyScored=true; break; } }
+  var minSc2=1; try{ minSc2=parseInt($("pfMinScore").value,10); if(isNaN(minSc2)) minSc2=1; }catch(ep2){}
+  var anyScored=false; for(var s2=0;s2<PERSFIND.length;s2++){ if(PERSFIND[s2].score>=minSc2){ anyScored=true; break; } }
   showEl("persNone", !anyScored);
-  renderPersistGrid();
 }
 function renderPersistGrid(){
   // persistence grid: click name to view contents; "open" opens the raw file's folder in Explorer
@@ -4130,13 +4199,15 @@ function downloadSqleWrapper(i){
 
 /* ---------- Overview sub-sections (v0.2) ---------- */
 function renderPersFind(){
-  // A real host has hundreds of benign cron/systemd ExecStart lines - surface only the ones a
-  // heuristic scored (>=1), and note how many benign entries were parsed but hidden.
-  var rows=[]; for(var i=0;i<PERSFIND.length;i++){ if(PERSFIND[i].score>=1) rows.push(PERSFIND[i]); }
+  // A real host has hundreds of benign cron/systemd ExecStart lines - the min-score select
+  // (v0.16, default >=1) decides how much of that noise to surface.
+  var minSc=1; try{ minSc=parseInt($("pfMinScore").value,10); if(isNaN(minSc)) minSc=1; }catch(ep){}
+  var rows=[]; for(var i=0;i<PERSFIND.length;i++){ if(PERSFIND[i].score>=minSc) rows.push(PERSFIND[i]); }
   var hidden=PERSFIND.length-rows.length;
   showEl("persFindWrap", rows.length>0);
   if(!rows.length){ $("pfTbl").innerHTML=""; return; }
   rows.sort(function(a,b){ return b.score-a.score; });
+  if(rows.length>2000){ rows=rows.slice(0,2000); }   // "all" on a busy host stays renderable
   var h='<thead><tr><th title="Suspicion score - hover the tags for reasons">Score</th>'
     +'<th title="Timestamp when the source carries one (histories with HISTTIMEFORMAT)">When</th>'
     +'<th title="Which persistence file/artifact the command line came from">Source</th>'
@@ -4148,7 +4219,7 @@ function renderPersFind(){
       +'<td class="mono muted" title="'+esc(r.src)+'">'+esc(trunc(r.src,34))+'</td>'
       +'<td class="mono muted">'+esc(r.detail)+'</td>'
       +'<td class="mono" title="'+esc(r.cmd)+'">'+esc(trunc(r.cmd,110))+'</td></tr>'; }
-  if(hidden>0) h+='<tr><td colspan="5" class="muted">'+nf(hidden)+' benign persistence command line(s) parsed and scored 0 (not shown)</td></tr>';
+  if(hidden>0) h+='<tr><td colspan="5" class="muted">'+nf(hidden)+' persistence command line(s) below the score threshold (change the score filter above to see them)</td></tr>';
   h+="</tbody>"; $("pfTbl").innerHTML=h; setupColResizeFor($("pfTbl"),"ov_persfind"); freezeById("pfTbl");
 }
 function renderPackages(){
@@ -4159,12 +4230,13 @@ function renderPackages(){
     +(susN?(' <span class="tag sus">'+susN+' suspicious</span>'):'')
     +(manual?(' <span class="tag info">'+manual+' user-requested</span>'):(PKGS.length?' <span class="tag info">all automated</span>':''));
   if(!PKGS.length){ $("pkgTbl").innerHTML=""; return; }
-  var h='<thead><tr><th title="Install/change time from apt history / dpkg log (host-local as written)">When</th>'
+  var h='<thead><tr><th title="Install/change time (normalized from the host-local apt/dpkg logs; obeys the host-TZ toggle)">When ('+esc(tzLabel())+')</th>'
     +'<th title="install / upgrade / remove / purge / downgrade">Action</th>'
     +'<th title="Package name (SUS chip = dual-use tooling watchlist; IOC = matched your IOC list)">Package</th>'
     +'<th title="Requested-By from apt history - separates a human apt install from unattended upgrades">Requested by</th></tr></thead><tbody>';
   for(var i=0;i<PKGS.length && i<300;i++){ var p=PKGS[i]; var isIoc=iocHit(p.blob); var cls=isIoc?"ioc row-flag":(p.susp?"row-warn":"");
-    h+='<tr'+(cls?(' class="'+cls+'"'):'')+'><td class="mono'+((isIoc||p.susp)?' first':'')+'" title="'+esc(p.mgr)+'">'+esc(p.when)+'</td>'
+    var pep=pkgEpoch(p);   // v0.16: display normalized UTC/host-TZ time, not the raw host-local log string
+    h+='<tr'+(cls?(' class="'+cls+'"'):'')+'><td class="mono'+((isIoc||p.susp)?' first':'')+'" title="'+esc(p.mgr)+' raw: '+esc(p.when)+'">'+esc(pep?fmtTime(pep,false):p.when)+'</td>'
       +'<td class="mono muted">'+esc(p.action)+'</td>'
       +'<td class="mono">'+esc(p.pkg)+(p.susp?' <span class="tag sus" title="offensive/dual-use tooling">SUS</span>':'')+(isIoc?' <span class="tag ioc">IOC</span>':'')+'</td>'
       +'<td class="mono muted" title="'+esc(p.by)+'">'+esc(trunc(p.by||"-",22))+'</td></tr>'; }
@@ -4247,9 +4319,25 @@ function profileEmptyMsg(n, what){ if(n>0) return false;
   $("tbl").innerHTML='<thead><tr><th>'+esc(what)+'</th></tr></thead><tbody><tr><td class="muted">'+esc(msg)+'</td></tr></tbody>';
   $("count").innerHTML="0 rows"; return true; }
 var PROC_TREE=false, PTREE_COLLAPSED={};
+/* v0.16: suspicion-category filter (by scoring tag, with counts) - orthogonal to "flagged only" */
+function populateProcSus(){
+  var el=$("procSusSel"); if(!el) return; var cur=el.value;
+  var cnt={}, i, t2;
+  for(i=0;i<PROC.length;i++){ var tg=PROC[i].tags||[]; for(t2=0;t2<tg.length;t2++){ cnt[tg[t2]]=(cnt[tg[t2]]||0)+1; } }
+  var keys=keysOf(cnt); keys.sort();
+  var opts=['<option value="">suspicion: all</option>'];
+  for(i=0;i<keys.length;i++) opts.push('<option value="'+esc(keys[i])+'"'+(keys[i]===cur?" selected":"")+'>'+esc(keys[i])+' ('+cnt[keys[i]]+')</option>');
+  el.innerHTML=opts.join(""); if(cur) el.value=cur;
+}
+function procPass(r){
+  if(!passQ(r)) return false;
+  var ft=""; try{ ft=$("procSusSel").value; }catch(e){}
+  return !ft || hasTag(r,ft);
+}
 function renderProc(){
+  populateProcSus();
   if(PROC_TREE){ renderProcTree(); return; }
-  var rows=[]; for(var i=0;i<PROC.length;i++) if(passQ(PROC[i])) rows.push(PROC[i]);
+  var rows=[]; for(var i=0;i<PROC.length;i++) if(procPass(PROC[i])) rows.push(PROC[i]);
   sortRows(rows,PCOLS,SORT.proc); drawTable(PCOLS,rows,SORT.proc,"proc"); profileEmptyMsg(PROC.length,"processes"); }
 /* collapsible parent/child tree. Roots = rows whose ppid isn't itself a listed process (or ppid 0).
    passQ (search / flagged-only) hides non-matching LEAVES but keeps ancestors of any match so the
@@ -4259,7 +4347,7 @@ function renderProcTree(){
   // which pids to show: a row passes if it matches passQ OR any descendant does
   var show={}, i;
   function anyMatch(pid, guard){ if(guard>200) return false; var r=PROCBYPID[pid];
-    var self=r?passQ(r):false; var kids=PROCKIDS[pid]||[]; var kid=false;
+    var self=r?procPass(r):false; var kids=PROCKIDS[pid]||[]; var kid=false;   // v0.16: suspicion filter applies in tree view too
     for(var k=0;k<kids.length;k++){ if(anyMatch(kids[k], guard+1)) kid=true; }
     if(self||kid) show[pid]=1; return self||kid; }
   // roots
@@ -4297,8 +4385,10 @@ var NCOLS=[
   {h:"Score / tags", tip:"Suspicion score (>=3 is flagged) plus scoring tags - hover a tag for the full reasons", sk:function(r){return r.score;}, cell:function(r){return scoreCell(r);}},
   {h:"Proto", tip:"tcp / udp (v6 sockets decoded too)", sk:function(r){return r.proto;}, cell:function(r){return '<td class="mono">'+esc(r.proto)+'</td>';}},
   {h:"State", tip:"Socket state (LISTEN / ESTAB / ...)", sk:function(r){return r.state;}, cell:function(r){return '<td class="mono">'+esc(r.state)+'</td>';}},
+  {h:"Type", tip:"Service type derived from well-known ports (SSH/HTTP/SMB/RDP/... ; blank = no well-known port involved)", sk:function(r){return netSvcOf(r);}, cell:function(r){var sv=netSvcOf(r);return '<td class="mono muted">'+esc(sv||"-")+'</td>';}},
   {h:"Local", tip:"Local address:port", sk:function(r){return lc(r.local);}, cell:function(r){return '<td class="mono" title="'+esc(r.local)+'">'+esc(r.local)+'</td>';}},
-  {h:"Remote", tip:"Remote address:port", sk:function(r){return lc(r.peer);}, cell:function(r){return '<td class="mono" title="'+esc(r.peer)+'">'+esc(r.peer)+'</td>';}},
+  {h:"Remote", tip:"Remote address:port - click a PUBLIC IP to open it in VirusTotal (launches your browser)", sk:function(r){return lc(r.peer);}, cell:function(r){var pub=(r.peerAddr && !ipIsLocal(r.peerAddr));
+    return '<td class="mono" title="'+esc(r.peer)+(pub?"  ·  click the IP for VirusTotal":"")+'">'+(pub?('<span class="lnk" data-vt="'+esc(r.peerAddr)+'">'+esc(r.peer)+'</span>'):esc(r.peer))+'</td>';}},
   {h:"Location", tip:"Country + ASN/org of the remote address (online geo/ASN enrichment; blank = local address, lookup off/offline, or still resolving)", sk:function(r){return geoTip(r.peerAddr);}, cell:function(r){return '<td class="mono muted" title="'+esc(geoTip(r.peerAddr))+'">'+esc(trunc(geoTip(r.peerAddr)||"-",38))+'</td>';}},
   {h:"Process", tip:"Owning process (recovered from /proc/net uid + fd inodes on non-root captures)", sk:function(r){return lc(r.procName);}, cell:function(r){return '<td class="mono muted">'+esc(r.procName?(r.procName+(r.procPid?(" ("+r.procPid+")"):"")):trimStr(r.procRaw))+'</td>';}}
 ];
@@ -4308,17 +4398,22 @@ function populateNetLoc(){
   var seen={}, i; for(i=0;i<NET.length;i++){ var lv=netLocOf(NET[i]); if(lv) seen[lv]=1; }
   fillSelect("netLocSel","location",keysOf(seen));
 }
+function populateNetType(){
+  var seen={}, i; for(i=0;i<NET.length;i++){ var sv=netSvcOf(NET[i]); if(sv) seen[sv]=1; }
+  fillSelect("netTypeSel","type",keysOf(seen));
+}
 function renderNet(){
-  var pub=false, floc=""; try{ pub=$("netPubOnly").checked; floc=$("netLocSel").value; }catch(enp){}
-  populateNetLoc();
+  var pub=false, floc="", ftype=""; try{ pub=$("netPubOnly").checked; floc=$("netLocSel").value; ftype=$("netTypeSel").value; }catch(enp){}
+  populateNetLoc(); populateNetType();
   var rows=[]; for(var i=0;i<NET.length;i++){ var r=NET[i];
     if(!passQ(r)) continue;
     // v0.13: "public IPs only" - rows whose remote end is a routable public address
     if(pub && !(r.peerAddr && !ipIsLocal(r.peerAddr))) continue;
     if(floc && netLocOf(r)!==floc) continue;   // v0.14: location filter (resolved country)
+    if(ftype && netSvcOf(r)!==ftype) continue; // v0.16: service-type filter
     rows.push(r); }
   sortRows(rows,NCOLS,SORT.net); drawTable(NCOLS,rows,SORT.net,"net");
-  if((pub||floc) && NET.length) $("count").innerHTML+=" ·"+(pub?" public-remote":"")+(floc?(" location="+esc(floc)):"")+" rows only";
+  if((pub||floc||ftype) && NET.length) $("count").innerHTML+=" ·"+(pub?" public-remote":"")+(floc?(" location="+esc(floc)):"")+(ftype?(" type="+esc(ftype)):"")+" rows only";
   profileEmptyMsg(NET.length,"network connections"); }
 
 /* logon table (v0.2) */
@@ -5062,7 +5157,10 @@ function activeFilterDesc(){
     if($("logfSrc").value) f.push("logon source = "+$("logfSrc").value);
     if($("logfResult").value) f.push("logon result = "+$("logfResult").value); }catch(e1){}
   try{ if($("netPubOnly").checked) f.push("network: public IPs only");
-    if($("netLocSel").value) f.push("network location = "+$("netLocSel").value); }catch(e2){}
+    if($("netLocSel").value) f.push("network location = "+$("netLocSel").value);
+    if($("netTypeSel").value) f.push("network type = "+$("netTypeSel").value); }catch(e2){}
+  try{ if($("procSusSel").value) f.push("process suspicion = "+$("procSusSel").value); }catch(e2b){}
+  try{ if($("pfMinScore").value!=="1") f.push("persistence score >= "+$("pfMinScore").value); }catch(e2c){}
   if(usersSelSet()) f.push("selected accounts only (Users tab)");
   try{ if((parseInt($("evMinScore").value,10)||0)>0) f.push("events score >= "+$("evMinScore").value);
     if($("evKind").value) f.push("events kind = "+$("evKind").value);
@@ -5087,10 +5185,13 @@ function generateReport(){
     var _P=F(PROC), _T=F(TIMEL), _W=F(WEBLOG), _A=F(AUDITX), _PF=F(PERSFIND), _K=F(PKGS), _C=F(CONTAINERS), _LA=F(LATERAL), _E=EVENTS, _N=F(NET), _L=F(LOGON), _U=F(USERS);
     if(useFilters){
       var b1=[],i7,r7;
-      var pub=false, floc=""; try{ pub=$("netPubOnly").checked; floc=$("netLocSel").value; }catch(en2){}
-      if(pub||floc){ for(i7=0;i7<_N.length;i7++){ r7=_N[i7];
+      var pub=false, floc="", ft6=""; try{ pub=$("netPubOnly").checked; floc=$("netLocSel").value; ft6=$("netTypeSel").value; }catch(en2){}
+      if(pub||floc||ft6){ for(i7=0;i7<_N.length;i7++){ r7=_N[i7];
         if(pub && !(r7.peerAddr && !ipIsLocal(r7.peerAddr))) continue;
-        if(floc && netLocOf(r7)!==floc) continue; b1.push(r7); } _N=b1; }
+        if(floc && netLocOf(r7)!==floc) continue;
+        if(ft6 && netSvcOf(r7)!==ft6) continue; b1.push(r7); } _N=b1; }
+      var ps6=""; try{ ps6=$("procSusSel").value; }catch(ep6){}
+      if(ps6){ b1=[]; for(i7=0;i7<_P.length;i7++){ if(hasTag(_P[i7],ps6)) b1.push(_P[i7]); } _P=b1; }
       var fu="",fs2="",fr2=""; try{ fu=$("logfUser").value; fs2=$("logfSrc").value; fr2=$("logfResult").value; }catch(el2){}
       b1=[]; for(i7=0;i7<_L.length;i7++){ r7=_L[i7];
         if(fu && trimStr(r7.user)!==fu) continue;
@@ -5306,9 +5407,15 @@ function init(){
   $("q").onkeyup=function(){ if(qTimer) window.clearTimeout(qTimer);
     qTimer=window.setTimeout(function(){ QUERY=trimStr($("q").value).toLowerCase(); render(); },150); };
   $("susOnly").onclick=function(){ SUSONLY=this.checked; render(); };
-  function setTz(on){ TZVIEW=on; try{ $("tzMain").checked=on; }catch(e1){} try{ $("tzLogs").checked=on; }catch(e2){} try{ $("evTz").checked=on; }catch(e3){} render(); }
+  function setTz(on){ TZVIEW=on;
+    try{ $("tzMain").checked=on; }catch(e1){} try{ $("tzLogs").checked=on; }catch(e2){} try{ $("evTz").checked=on; }catch(e3){}
+    try{ $("tzOv").checked=on; }catch(e4){} try{ $("tzPersist").checked=on; }catch(e5){} try{ $("tzApps").checked=on; }catch(e6){}
+    render(); }
   $("tzMain").onclick=function(){ setTz(this.checked); };
   $("tzLogs").onclick=function(){ setTz(this.checked); };
+  $("tzOv").onclick=function(){ setTz(this.checked); };        // v0.16
+  $("tzPersist").onclick=function(){ setTz(this.checked); };   // v0.16
+  $("tzApps").onclick=function(){ setTz(this.checked); };      // v0.16
   $("logsExport").onclick=exportLogs;
   $("loadJournal").onclick=loadJournalWsl;
   // Events tab controls
@@ -5341,9 +5448,13 @@ function init(){
   $("reportBtn").onclick=generateReport;                // v0.13
   $("netLocSel").onchange=function(){ render(); };      // v0.14
   $("evNotable").onclick=function(){ render(); };       // v0.14
-  $("usersSel").onchange=function(){ render(); };       // v0.14
-  $("usersSelClear").onclick=function(){ try{ var el=$("usersSel"); for(var i2=0;i2<el.options.length;i2++) el.options[i2].selected=false; }catch(e){} render(); };
+  // v0.16: multiselect dropdown replaces the listbox
+  $("usersDropBtn").onclick=function(){ var p=$("usersDropPanel"); showEl("usersDropPanel", /\bhide\b/.test(p.className)); };
+  $("usersSelClear").onclick=function(){ USERS_SEL={}; renderUsersDropBtn(); render(); };
   $("logfHideLastlog").onclick=function(){ render(); };  // v0.15
+  $("netTypeSel").onchange=function(){ render(); };      // v0.16
+  $("procSusSel").onchange=function(){ render(); };      // v0.16
+  $("pfMinScore").onchange=function(){ render(); };      // v0.16
   $("dfrom").onchange=function(){ DFROM=dayNum(this.value); if(LASTROOT){ reparseTimeline(); } };
   $("dto").onchange=function(){ DTO=dayNum(this.value); if(LASTROOT){ reparseTimeline(); } };
   $("clearBtn").onclick=function(){ $("q").value=""; QUERY=""; $("susOnly").checked=false; SUSONLY=false;
@@ -5374,6 +5485,12 @@ function init(){
   document.onclick=function(e){ e=e||window.event; var t=e.target||e.srcElement;
     if(t && /\bcgrip\b/.test(t.className+"")) return;
     // element-level actions first (data-open / data-pf can live on a td or span, not the tr)
+    // v0.16: users-dropdown - checkbox toggles select; any click outside the panel closes it
+    var uSel=attrUp(t,"data-usel");
+    if(uSel){ if(USERS_SEL[uSel]) delete USERS_SEL[uSel]; else USERS_SEL[uSel]=1; renderUsersDropBtn(); render(); return; }
+    if(!attrUp(t,"data-udrop")){ var udp=$("usersDropPanel"); if(udp && !/\bhide\b/.test(udp.className)) showEl("usersDropPanel",false); }
+    // v0.16: click a public remote IP -> VirusTotal (launches the default browser)
+    var vt2=attrUp(t,"data-vt"); if(vt2){ openUrl("https://www.virustotal.com/gui/ip-address/"+vt2); return; }
     var op=attrUp(t,"data-open"); if(op){ openInExplorer(op); return; }
     var jmp=attrUp(t,"data-jump"); if(jmp){ var je=$(jmp); if(je && je.scrollIntoView) try{ je.scrollIntoView(true); }catch(ej){} return; }
     var gt2=attrUp(t,"data-gotab"); if(gt2){ setTab(gt2); return; }   // v0.13: stat cards can open a tab
@@ -5455,6 +5572,7 @@ window.onload=function(){ init(); try{ window.setTimeout(checkSelfUpdate,600); }
       <li><b>Inventory tab</b> - a map of every key artifact (processes, network, logons, accounts, persistence, system, filesystem, logs, containers) showing present/absent, size, and an <b>open folder</b> link that opens the raw file in Explorer. The Persistence &amp; config inventory on Overview has the same open-folder links; click an artifact name there to view its contents inline.</li>
       <li><b>UI (v0.7):</b> the Processes table has a <b>Name</b> column and a <b>Tree view</b> toggle (collapsible parent/child hierarchy - click ▸/▾ to fold, a row for detail). <b>Logons</b> has User / Source / Result filters and a clickable link to each raw source log. <b>Events</b> has a min-score filter and a kind filter. Long tables keep their <b>header row frozen</b> while scrolling, and <b>Persistence &amp; system findings</b> shows a date/time column.</li>
       <li><b>Resizable columns</b> everywhere - drag the right edge of any column header (it highlights on hover); double-click the edge to reset. Widths persist per view.</li>
+      <li><b>Filters &amp; polish release (v0.16):</b> the Users account filter became a proper <b>multiselect dropdown</b> (checkbox panel); Processes gained a <b>suspicion-category filter</b> (by scoring tag, with counts, works in tree view too); Network gained a <b>Type column + filter</b> (SSH/HTTP/SMB/RDP/... derived from well-known ports) and <b>click-to-VirusTotal</b> on public remote IPs (launches your browser). "Capture overview" is now <b>System overview</b>, with a <b>Network addresses</b> sub-table (friendly adaptor labels: Ethernet / Wi-Fi / Docker bridge / VPN-tunnel...), an explicit <b>Host time zone</b> row, and a <b>host-TZ toggle on every surface that shows times</b> (Overview incl. boots, Persistence, Apps, Users) - all toggles stay in sync. Package-install and boot times now display <b>normalized UTC</b> (raw host-local strings in the tooltip) instead of raw log text. Apps tab: <b>Docker containers</b> renamed and moved to the top; Persistence tab: <b>config inventory first</b>, findings gain a <b>min-score filter</b> (down to "all incl. benign", capped at 2,000 rows). The filtered-report prompt covers the new filters.</li>
       <li><b>Context release (v0.15):</b> the Overview now answers "which box is this and what can the capture speak to": a <b>network identity</b> block (interface IPs + MACs from <code>ip addr</code>/<code>ifconfig</code>), an <b>observable-activity window</b> (earliest→latest plausible timestamp across all datasets - what <code>/from /to</code> can usefully cover), <b>top external IPs</b> (most connections + logons + web requests, geo-tagged), an <b>analysis-performance</b> row (extract + parse durations, failed parser steps), and the <b>cloud-init provisioning baseline</b> (moved from Logs). Logons hides <b>lastlog state rows</b> by default (they're per-account state, shown on Users; a toolbar tick mixes them back in, hidden count disclosed). An empty Processes tab on a logs-only capture now points at Logs → Service inventory as the nearest substitute. The report gains identity / activity / top-talkers / cloud-init context.</li>
       <li><b>Refinement release (v0.14):</b> <b>Lateral movement</b> now lives on the Logons tab (above the logon table - it's the outbound half of the auth story; the Overview stat card jumps there), and the <b>Boots</b> table moved from Logs to the Overview. Tab order: Apps and Users sit left of Logons. <b>Web logs is renamed Apache logs</b> (still parses apache2/nginx/httpd combined format). Network gains a <b>Location column</b> (country + ASN, right of Remote) and a <b>location dropdown filter</b>; Events gains a <b>notable-events</b> filter (OOM / promisc / USB / modules / hosts pins / boots / journal anomalies); Users gains a <b>multiselect account filter</b>. <b>Generate report</b> now detects active UI filters and asks whether to write a <b>FILTERED report</b> (mirroring exactly what's on screen, clearly labelled, <code>_filtered</code> filename suffix) or the full one. Run metadata gains <b>Distribution</b> (/etc/os-release) and <b>Kernel</b> (uname). The processing-time pill moved next to the Instructions button.</li>
       <li><b>Layout &amp; reporting release (v0.13):</b> the tab bar is reorganised (Inventory sits beside Overview) and three sections graduated to their own tabs - <b>Persistence</b> (scored findings + config inventory), <b>Apps</b> (package installs + containers) and <b>Browser</b> (browser DBs + SQLECmd hand-off) - leaving the Overview focused on metadata, stats, top findings and lateral movement, with the <b>sar CPU summary</b> now pinned at its top (a cryptominer tell shouldn't hide on the Logs tab). <b>Generate report</b> (Overview button) writes a self-contained dark-theme HTML report with a navigation pane mirroring the tab names - score-sorted tables capped at the highest-signal rows, caps disclosed, safe to attach to a case. The Network tab gains a <b>public IPs only</b> filter, and <b>every table heading now carries a tooltip</b> explaining the column. Perf: the persistence deep-parse dropped from ~10 s to a fraction via a singleton FSO + fast reads for directory sweeps (found via the new v0.12 [perf] log).</li>
