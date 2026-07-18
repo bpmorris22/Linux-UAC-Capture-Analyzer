@@ -308,7 +308,7 @@
           <option value="0">all (incl. benign)</option>
         </select>
         <label style="font-size:12px;margin-left:10px" title="Render times in the collector's host time zone instead of UTC."><input type="checkbox" id="tzPersist"> Host TZ</label>
-        <span class="muted" style="font-size:11px;margin-left:8px">cron (+ hourly/daily/weekly/monthly &amp; anacron) / systemd units, timers, Environment LD_PRELOAD, socket ListenStream &amp; generators / authorized_keys (forced-command &amp; environment=) / rc.local (+RHEL) &amp; init.d / ld.so.preload &amp; ld.so.conf.d / accounts / suid &amp; capability sweeps / SSH keys / histories &amp; startup files / system profile.d &amp; bash.bashrc / SSH-login rc &amp; sshrc / network-event hooks (dispatcher.d, if-up.d, dhclient, ppp) / modprobe &amp; module autoload / udev RUN / binfmt_misc / at jobs / motd &amp; apt hooks / XDG autostart / PAM modules &mdash; every command line also gets a RAT/C2 lens (reverse-shell/backpipe/encoded-loader patterns incl. php/ruby/gawk &amp; /dev/udp, beacon cadence, known-implant names, hardcoded callback IPs/IPv6/domains)</span>
+        <span class="muted" style="font-size:11px;margin-left:8px">cron (+ hourly/daily/weekly/monthly &amp; anacron) / systemd units + <b>drop-in overrides</b>, timers, Environment LD_PRELOAD, socket ListenStream/Service, generators &amp; trigger targets / authorized_keys (forced-command &amp; environment=) / rc.local (+RHEL) &amp; init.d / ld.so.preload &amp; ld.so.conf.d / accounts / suid &amp; capability sweeps / SSH keys &amp; sshd auth-source config / histories &amp; startup files / system profile.d &amp; bash.bashrc / SSH-login rc, sshrc &amp; ~/.ssh/environment / network-event hooks (dispatcher.d, if-up.d, dhclient, ppp) / modprobe &amp; module autoload / udev RUN / binfmt_misc / at jobs / cloud-init per-boot / D-Bus activation / PAM (auth+account+password+session) / XDG autostart &mdash; every command line gets a RAT/C2 lens (reverse-shell/backpipe/encoded-loader incl. php/ruby/gawk &amp; /dev/udp, tunnels autossh/ssh-R/cloudflared, beacon cadence, boundary-matched implant names, callback IPs/IPv6/domains), and a persistence target that is a <b>running process holding a public connection</b> is escalated (PERS-C2)</span>
       </div>
       <div id="persFindWrap" class="hide">
         <div class="scroll" style="max-height:42vh"><table id="pfTbl"></table></div>
@@ -476,7 +476,7 @@
 <script language="JScript">
 "use strict";
 
-var APP_VERSION = "1.7.1";
+var APP_VERSION = "1.8.0";
 /* v0.9.4 - SQLECmd wrapper: offer to DOWNLOAD instead of hunt for it (operator request):
    - if the wrapper isn't found anywhere, a hand-off now offers to download the latest
      SQLECmd-Wrapper.hta from GitHub into THIS app's folder (browse stays as the offline
@@ -1257,6 +1257,7 @@ function parseCapture(root, input){
   try{
     LASTROOT=root;
     INTEGRITY=[]; LOGEVENTS=[];   // appended to by parseLogons / parseSyslogServices / parseJournal / parseSar
+    CAPPED_READS={count:0, samples:[]};   // v1.8: reset the 1 MB read-skip tally per capture
     // v0.10: WSL-ingested journal content is capture-scoped - without this reset, host A's journal
     // events would silently appear in host B's Events timeline (cross-case contamination).
     JOURNALX={ loaded:false, events:[], note:"" };
@@ -1718,7 +1719,28 @@ var PERSIST_LIST=[
   {label:"sshd_config", rel:"[root]/etc/ssh/sshd_config", kind:"file"},
   {label:"/etc/hosts", rel:"[root]/etc/hosts", kind:"file"},
   {label:"SSH authorized_keys (per-user)", user:".ssh/authorized_keys", kind:"userfile"},
-  {label:"Shell histories (per-user)", user:[".bash_history",".zsh_history",".sh_history",".ash_history"], kind:"userfile"}
+  {label:"Shell histories (per-user)", user:[".bash_history",".zsh_history",".sh_history",".ash_history"], kind:"userfile"},
+  // v1.8: the locations the v1.7/v1.8 sweeps actually read - so the inventory matches the sweep
+  {label:"Periodic cron (cron.daily)", rel:"[root]/etc/cron.daily", kind:"dir"},
+  {label:"anacrontab", rel:"[root]/etc/anacrontab", kind:"file"},
+  {label:"systemd user units", rel:"[root]/etc/systemd/user", kind:"dir"},
+  {label:"systemd generators", rel:"[root]/etc/systemd/system-generators", kind:"dir"},
+  {label:"System profile.d", rel:"[root]/etc/profile.d", kind:"dir"},
+  {label:"SSH sshrc", rel:"[root]/etc/ssh/sshrc", kind:"file"},
+  {label:"SSH login rc (per-user)", user:".ssh/rc", kind:"userfile"},
+  {label:"Network hooks (if-up.d)", rel:"[root]/etc/network/if-up.d", kind:"dir"},
+  {label:"NetworkManager dispatcher.d", rel:"[root]/etc/NetworkManager/dispatcher.d", kind:"dir"},
+  {label:"dhclient exit hooks", rel:"[root]/etc/dhcp/dhclient-exit-hooks.d", kind:"dir"},
+  {label:"modules-load.d", rel:"[root]/etc/modules-load.d", kind:"dir"},
+  {label:"udev rules.d", rel:"[root]/etc/udev/rules.d", kind:"dir"},
+  {label:"binfmt.d", rel:"[root]/etc/binfmt.d", kind:"dir"},
+  {label:"ld.so.conf.d", rel:"[root]/etc/ld.so.conf.d", kind:"dir"},
+  {label:"PAM (pam.d)", rel:"[root]/etc/pam.d", kind:"dir"},
+  {label:"init.d", rel:"[root]/etc/init.d", kind:"dir"},
+  {label:"cloud-init per-boot", rel:"[root]/var/lib/cloud/scripts/per-boot", kind:"dir"},
+  {label:"D-Bus system services", rel:"[root]/usr/share/dbus-1/system-services", kind:"dir"},
+  {label:"XDG autostart", rel:"[root]/etc/xdg/autostart", kind:"dir"},
+  {label:"update-motd.d", rel:"[root]/etc/update-motd.d", kind:"dir"}
 ];
 /* user home dirs in the [root] mirror: [root]/root plus each [root]/home/<user> */
 function userHomes(root){
@@ -2156,7 +2178,10 @@ function pushPersFind(src, detail, cmd, base){
   PERSFIND.push(r);
   return r;
 }
-function readTextCapped(path){ try{ var sz=fileSize(path); if(sz>1048576) return ""; return readUtf8(path); }catch(e){ return ""; } }
+var CAPPED_READS={count:0, samples:[]};   // v1.8: files skipped for exceeding the 1 MB read cap (was silent)
+function readTextCapped(path){ try{ var sz=fileSize(path);
+  if(sz>1048576){ CAPPED_READS.count++; if(CAPPED_READS.samples.length<8) CAPPED_READS.samples.push(String(path).replace(/^.*\[root\]/,"[root]")+" ("+fmtSize(sz)+")"); return ""; }
+  return readUtf8(path); }catch(e){ return ""; } }
 function deepParseCronText(src, text){
   var lines=String(text).split("\n");
   for(var i=0;i<lines.length;i++){ var ln=trimStr(lines[i]);
@@ -2193,8 +2218,12 @@ function deepParseSystemdUnit(src, text){
       if(m && /^([0-9]{1,5}|(?:\d{1,3}\.){3}\d{1,3}:\d+|\[[0-9a-fA-F:]+\]:\d+)$/.test(m[2]))
         pushPersFind(src, "systemd socket Listen"+m[1], m[2],
           {score:1, tag:"SOCK-UNIT", reason:"systemd .socket listens on a network port ("+m[2]+") - socket-activated service; verify the paired .service is legitimate"}); continue; }
-    if(/\.timer$/i.test(src)){ m=lines[i].match(/^\s*Unit\s*=\s*(.+)$/i);
-      if(m) pushPersFind(src, "systemd timer target", trimStr(m[1])); }
+    // v1.8: trigger-unit targets - .timer/.path/.automount name the .service they activate via Unit=;
+    // a .socket names it via Service=. An explicit redirect to an unexpected service is the tell.
+    if(/\.(timer|path|automount)$/i.test(src)){ m=lines[i].match(/^\s*Unit\s*=\s*(.+)$/i);
+      if(m) pushPersFind(src, "systemd trigger target (Unit=)", trimStr(m[1])); }
+    if(/\.socket$/i.test(src)){ m=lines[i].match(/^\s*Service\s*=\s*(.+)$/i);
+      if(m) pushPersFind(src, "systemd socket target (Service=)", trimStr(m[1])); }
   }
 }
 function deepParseAuthorizedKeys(src, text){
@@ -2227,11 +2256,17 @@ function deepParsePersistence(root){
   // systemd units: system + user unit dirs (v0.10: .timer/.socket/.path/.mount too, plus
   // /etc|/usr/lib systemd/user and each user's ~/.config/systemd/user - user units are a
   // persistence spot most triage misses)
+  // v1.8: broader systemd load-path coverage - /run (transient/generated, live captures), /usr/local
+  // (admin-installed), and the XDG user path. /run/user/<uid>/systemd/user is handled per-home below.
   var unitDirs=["[root]/etc/systemd/system","[root]/lib/systemd/system","[root]/usr/lib/systemd/system",
-                "[root]/etc/systemd/user","[root]/usr/lib/systemd/user","[root]/lib/systemd/user"];
+                "[root]/usr/local/lib/systemd/system","[root]/run/systemd/system","[root]/run/systemd/generator","[root]/run/systemd/generator.late",
+                "[root]/etc/systemd/user","[root]/usr/lib/systemd/user","[root]/lib/systemd/user",
+                "[root]/usr/local/lib/systemd/user","[root]/etc/xdg/systemd/user"];
   for(i=0;i<unitDirs.length;i++){ scanUnits(root, unitDirs[i]); }
   var uhomes=userHomes(root);
-  for(i=0;i<uhomes.length;i++){ scanUnitsAbs(uhomes[i]+"\\.config\\systemd\\user", "~"+userLabel(uhomes[i]+"\\x")+"/.config/systemd/user"); }
+  for(i=0;i<uhomes.length;i++){ var ul=userLabel(uhomes[i]+"\\x");
+    scanUnitsAbs(uhomes[i]+"\\.config\\systemd\\user", "~"+ul+"/.config/systemd/user");
+    scanUnitsAbs(uhomes[i]+"\\.local\\share\\systemd\\user", "~"+ul+"/.local/share/systemd/user"); }
   // rc.local
   t=readTextCapped(jp(root,"[root]/etc/rc.local"));
   if(t){ var rl=t.split("\n"); for(i=0;i<rl.length;i++){ var ln=trimStr(rl[i]);
@@ -2375,7 +2410,38 @@ function sweepExtraPersistence(root){
   eachFile("[root]/var/spool/at", function(f){ var nm=f.Name+""; if(!/^[a-zA-Z]/.test(nm)) return; sweepLines("at-job("+nm+")", "at scheduled job", readTextFast(f)); });
   eachFile("[root]/var/spool/cron/atjobs", function(f){ sweepLines("atjob("+f.Name+")", "at scheduled job", readTextFast(f)); });
   eachFile("[root]/etc/binfmt.d", function(f){ if(/\.conf$/i.test(f.Name+"")) sweepBinfmt("binfmt.d/"+f.Name, readTextFast(f)); });
+
+  // --- v1.8: cloud-init, D-Bus, ~/.ssh/environment ---
+  // cloud-init runs scripts/per-boot on EVERY boot (per-instance once per instance, per-once once ever)
+  var ciDirs=[["[root]/var/lib/cloud/scripts/per-boot","cloud-init per-boot","runs on EVERY boot",2],
+              ["[root]/var/lib/cloud/scripts/per-instance","cloud-init per-instance","runs once per instance",1],
+              ["[root]/var/lib/cloud/scripts/per-once","cloud-init per-once","runs once ever",1],
+              ["[root]/var/lib/cloud/scripts/vendor","cloud-init vendor script","vendor-supplied boot script",1]];
+  for(k=0;k<ciDirs.length;k++){ (function(cd){ eachFile(cd[0], function(f){ var nm=f.Name+"";
+    pushPersFind(baseName(cd[0])+"/"+nm, cd[1], nm, {score:cd[3], tag:"CLOUD-INIT", reason:cd[1]+" script - "+cd[2]+" as root; verify it is expected provisioning"});
+    sweepLines(baseName(cd[0])+"/"+nm, "cloud-init script line", readTextFast(f)); }); })(ciDirs[k]); }
+  // cloud-init user-data runcmd:/bootcmd: lines (best-effort; user-data may be encoded/MIME)
+  sweepLines("cloud-init user-data", "runcmd/bootcmd line", readAt("[root]/var/lib/cloud/instance/user-data.txt"));
+  // D-Bus service activation: an on-demand .service with Exec= that runs from an unusual path or is hostile
+  var dbusDirs=["[root]/usr/share/dbus-1/system-services","[root]/usr/local/share/dbus-1/system-services","[root]/usr/share/dbus-1/services","[root]/usr/local/share/dbus-1/services","[root]/etc/dbus-1/system-services"];
+  for(k=0;k<dbusDirs.length;k++){ (function(dd2){ eachFile(dd2, function(f){ if(!/\.service$/i.test(f.Name+"")) return; sweepDbusService("dbus/"+f.Name, readTextFast(f)); }); })(dbusDirs[k]); }
+  for(i=0;i<uhomes.length;i++){ (function(ul){ eachFile2(uhomes[i]+"\\.local\\share\\dbus-1\\services", function(f){ if(/\.service$/i.test(f.Name+"")) sweepDbusService("~"+ul+"/.local/share/dbus-1/services/"+f.Name, readTextFast(f)); }); })(userLabel(uhomes[i]+"\\x")); }
+  // ~/.ssh/environment: with PermitUserEnvironment on, every line is injected into that user's SSH sessions
+  var envHits=findUserFiles(root, ".ssh/environment");
+  for(i=0;i<envHits.length;i++){ sweepLines("~"+userLabel(envHits[i])+"/.ssh/environment", "SSH per-user environment injection", readTextCapped(envHits[i]),
+    {score:2, tag:"AK-ENV", reason:"~/.ssh/environment is injected into this account's SSH sessions when PermitUserEnvironment is on (an LD_PRELOAD line here is library injection)"}); }
 }
+// eachFile variant taking an absolute (already jp'd) dir - for per-home paths
+function eachFile2(dir, cb){ var fso=new ActiveXObject("Scripting.FileSystemObject"); if(!fso.FolderExists(dir)) return;
+  try{ var e=new Enumerator(fso.GetFolder(dir).Files); for(;!e.atEnd();e.moveNext()) cb(e.item()); }catch(er){} }
+/* v1.8: a D-Bus activation .service launches its Exec= on demand. Flag only when the Exec runs from
+   a non-standard/writable path or the line is otherwise hostile - stock desktop services are legion. */
+function sweepDbusService(src, text){ if(!text) return; var m=String(text).match(/^\s*Exec\s*=\s*(.+)$/mi); if(!m) return;
+  var exe=trimStr(m[1]); if(!exe) return;
+  var first=exe.replace(/^["']+/,"").split(/\s+/)[0];
+  var std=/^\/(usr\/)?s?bin\//.test(first)||/^\/usr\/lib(exec)?\//.test(first)||/^\/lib(64)?\//.test(first)||/^\/usr\/libexec\//.test(first);
+  if(!std || hostileLine(exe)) pushPersFind(src, "D-Bus service activation Exec", exe,
+    {score:std?1:2, tag:"DBUS-SVC", reason:"D-Bus registers this service to launch '"+trunc(exe,60)+"' on demand"+(std?"":" from a non-standard path")}); }
 function sweepModuleAutoload(src, text){ if(!text) return; var a=String(text).split("\n");
   for(var j=0;j<a.length;j++){ var m=trimStr(a[j]); if(m===""||m.charAt(0)==="#") continue;
     m=firstToken(m.replace(/\s+#.*$/,"")); if(!m) continue;
@@ -2401,16 +2467,33 @@ function sweepBinfmt(src, text){ if(!text) return; var a=String(text).split("\n"
         {score:2, tag:"BINFMT", reason:"binfmt_misc registers interpreter '"+trunc(interp,50)+"' outside standard paths - runs on a magic-byte match (arbitrary-exec proxy)"}); } }
 function userLabel(p){ p=String(p).replace(/\\/g,"/"); var m=p.match(/\[root\]\/(?:home\/([^\/]+)|(root))\//i); return m?(m[1]||m[2]):baseName(parentDir(parentDir(p))); }
 function scanUnits(root, rel){ scanUnitsAbs(jp(root,rel), rel.replace("[root]","")); }
+var UNIT_EXT=/\.(service|timer|socket|path|mount|automount|swap|target)$/i;
 function scanUnitsAbs(dir, label){
   var fso=new ActiveXObject("Scripting.FileSystemObject");
   if(!fso.FolderExists(dir)) return;
-  try{ var e=new Enumerator(fso.GetFolder(dir).Files);
+  var fo; try{ fo=fso.GetFolder(dir); }catch(e0){ return; }
+  try{ var e=new Enumerator(fo.Files);
     for(;!e.atEnd();e.moveNext()){ var f=e.item();
       // v0.10: .timer/.socket/.path/.mount are persistence vectors too (was .service only)
-      if(!/\.(service|timer|socket|path|mount)$/i.test(f.Name+"")) continue;
+      if(!UNIT_EXT.test(f.Name+"")) continue;
       var t=readTextFast(f); if(t) deepParseSystemdUnit(label+"/"+f.Name, t); }   // v0.13 perf: fast read via the File object we already hold
   }catch(er){}
-  // one level of subfolders (…/multi-user.target.wants etc. are usually symlinks Windows dropped, so shallow is fine)
+  // v1.8: recurse ONE level into subfolders. Drop-in dirs (<unit>.service.d / service.d) hold .conf
+  // OVERRIDES that systemd merges after the primary unit - a malicious ExecStart= override lives
+  // here and was previously invisible (the code only read Folder.Files, never subfolders, despite
+  // the old comment). .wants/.requires are symlink dirs Windows extraction drops, and their targets
+  // are parsed from their real location anyway, so they are skipped.
+  try{ var s=new Enumerator(fo.SubFolders);
+    for(;!s.atEnd();s.moveNext()){ var sf=s.item(), sn=sf.Name+"";
+      if(/\.(wants|requires)$/i.test(sn)) continue;
+      var isDrop=/\.d$/i.test(sn);
+      try{ var e2=new Enumerator(sf.Files);
+        for(;!e2.atEnd();e2.moveNext()){ var f2=e2.item(), fn2=f2.Name+"";
+          if(isDrop){ if(!/\.conf$/i.test(fn2)) continue; } else if(!UNIT_EXT.test(fn2)) continue;
+          var t2=readTextFast(f2); if(t2) deepParseSystemdUnit(label+"/"+sn+"/"+fn2+(isDrop?" [drop-in override]":""), t2); }
+      }catch(er2){}
+    }
+  }catch(er3){}
 }
 
 /* ---- Enhancement 4a: recent package activity within the case window ----
@@ -2649,6 +2732,9 @@ function parseSar(root){
 /* ---- log-integrity checks (buildIntegrity runs after the other parsers append their own) ---- */
 function buildIntegrity(root){
   var fso=new ActiveXObject("Scripting.FileSystemObject"), i;
+  // v1.8: config/persistence files over 1 MB are skipped by the capped reader - surface it (was silent)
+  if(CAPPED_READS.count>0) INTEGRITY.push({check:"parser coverage", sev:1,
+    detail:nf(CAPPED_READS.count)+" config/persistence file(s) exceeded the 1 MB read cap and were NOT parsed for content (e.g. "+CAPPED_READS.samples.slice(0,3).join(", ")+") - inspect these raw if a large sshd_config / cron / unit / rc file is suspected of hiding a payload"});
   // zero-byte critical logs that normally carry content
   var crit=[["[root]/var/log/auth.log","auth.log"],["[root]/var/log/syslog","syslog"],["[root]/var/log/wtmp","wtmp"]];
   for(i=0;i<crit.length;i++){ var fp=jp(root,crit[i][0]); if(fso.FileExists(fp)){ var sz=0; try{ sz=fso.GetFile(fp).Size; }catch(e){}
@@ -3193,7 +3279,9 @@ var HIST_PREFILTER=/\b(nc|ncat|socat|curl|wget|base64|chmod\s+\+x|useradd|usermo
    scripts, per-user rc, histories). HIST_PREFILTER alone missed lines the C2 lens would flag - an
    implant-by-name or a reverse-shell variant with no HIST_PREFILTER token was dropped before it
    ever reached rescorePersFind. Now a line is kept if ANY of the three would score it. */
-function hostileLine(ln){ if(!ln) return false; return HIST_PREFILTER.test(ln) || !!implantHit(ln) || c2Patterns(ln).length>0; }
+function hostileLine(ln){ if(!ln) return false; if(HIST_PREFILTER.test(ln)) return true;
+  var im=implantHit(ln); if(im && im.where!=="arg") return true;   // trust a program/path match, not a bare argument mention
+  return c2Patterns(ln).length>0; }
 function histScoreLine(src, user, ln, ep){
   if(!ln || ln.length>500 || !hostileLine(ln)) return;
   var base=null;
@@ -3381,7 +3469,12 @@ var MITRE={
   "SYSD-GEN":["T1543.002","Create or Modify System Process: systemd generator"],
   "LDPATH":["T1574.006","Hijack Execution Flow: Dynamic Linker (ld.so.conf.d)"],
   "AK-ENV":["T1098.004","SSH authorized_keys manipulation (environment=)"],
-  "BEACON":["T1071","Application Layer Protocol: C2 beaconing"]
+  "BEACON":["T1071","Application Layer Protocol: C2 beaconing"],
+  /* v1.8: persistence->process->socket correlation (PERS-RUN/PERS-SUSPROC are correlations, unmapped) */
+  "PERS-C2":["T1071","Application Layer Protocol: active C2 from a persistence target"],
+  "TUNNEL":["T1572","Protocol Tunneling"],
+  "CLOUD-INIT":["T1037","Boot or Logon Initialization Scripts: cloud-init"],
+  "DBUS-SVC":["T1546","Event Triggered Execution: D-Bus service activation"]
 };
 /* distinct techniques for a set of tags: [{id,name}] */
 function techsForTags(tags){ var seen={}, out=[]; for(var i=0;i<tags.length;i++){ var m=MITRE[tags[i]];
@@ -3476,7 +3569,14 @@ function parseConfigDrift(root){
     var port=ssh("port"); if(port && port!=="22") drift("sshd_config", "Port "+port+" - SSH on a non-standard port", 1, "SSHD-CFG");
     if(ssh("permittunnel")==="yes") drift("sshd_config", "PermitTunnel yes - L2/L3 tunnelling over SSH permitted", 2, "SSHD-CFG");
     var akf=ssh("authorizedkeysfile"); if(akf && akf.indexOf(".ssh/authorized_keys")<0) drift("sshd_config", "AuthorizedKeysFile "+directives["authorizedkeysfile"]+" - keys read from a non-standard path", 2, "SSHD-CFG");
-    if(/forcecommand/.test(ssh("forcecommand")||"")) drift("sshd_config", "ForceCommand set: "+trunc(directives["forcecommand"],60), 1, "SSHD-CFG");
+    // v1.8: ForceCommand fix - the old check tested for the literal word "forcecommand" IN the value, so it never fired
+    var fcmd=ssh("forcecommand"); if(fcmd && fcmd!=="none") drift("sshd_config", "ForceCommand set: "+trunc(directives["forcecommand"],60)+" - runs on every SSH login for matching sessions", 2, "SSHD-CFG");
+    // v1.8: auth-source blind spots - these move trust off authorized_keys or run a helper at auth time
+    var akc=ssh("authorizedkeyscommand"); if(akc && akc!=="none") drift("sshd_config", "AuthorizedKeysCommand "+trunc(directives["authorizedkeyscommand"],60)+" - a helper program supplies keys at auth time (verify it + AuthorizedKeysCommandUser)", 2, "SSHD-CFG");
+    var apc=ssh("authorizedprincipalscommand"); if(apc && apc!=="none") drift("sshd_config", "AuthorizedPrincipalsCommand "+trunc(directives["authorizedprincipalscommand"],60)+" - a helper program supplies cert principals at auth time", 2, "SSHD-CFG");
+    var apf=ssh("authorizedprincipalsfile"); if(apf && apf!=="none") drift("sshd_config", "AuthorizedPrincipalsFile "+trunc(directives["authorizedprincipalsfile"],60)+" - controls which certificate principals may log in", 1, "SSHD-CFG");
+    var tuca=ssh("trustedusercakeys"); if(tuca && tuca!=="none") drift("sshd_config", "TrustedUserCAKeys "+trunc(directives["trustedusercakeys"],60)+" - a CA whose signed keys are trusted for login (verify the CA)", 1, "SSHD-CFG");
+    if(ssh("permituserenvironment")==="yes"||/^yes/.test(ssh("permituserenvironment")||"")) drift("sshd_config", "PermitUserEnvironment "+directives["permituserenvironment"]+" - ~/.ssh/environment and authorized_keys environment= can inject env (e.g. LD_PRELOAD) on login", 2, "SSHD-CFG");
   }
   // pam.d weaknesses. Debian/Ubuntu legitimately END common-auth with "auth required pam_permit.so"
   // as a fallback AFTER pam_deny/pam_unix decide, and gdm-autologin is pam_permit by design - so a
@@ -3488,15 +3588,19 @@ function parseConfigDrift(root){
     for(;!pe.atEnd();pe.moveNext()){ var pf=pe.item(), pn=pf.Name+""; var pt=readTextCapped(pf.Path+""); if(!pt) continue;
       var pls=pt.split("\n"), seenDecider=false;
       for(i=0;i<pls.length;i++){ var pl=trimStr(pls[i]); if(!pl||pl.charAt(0)==="#") continue;
-        var am=pl.match(/^auth\s+(\S+)\s+(\S+)/); if(!am) continue;
-        var ctrl=am[1], mod=am[2].toLowerCase();
-        if(/pam_unix\.so.*\bnullok(?!_secure)\b/.test(pl)) drift("pam.d/"+pn, "pam_unix nullok - blank passwords accepted (sometimes a desktop default): "+trunc(pl,60), 1, "PAM-CFG");
-        if(/pam_exec\.so/.test(mod)) drift("pam.d/"+pn, "pam_exec.so runs a script on PAM auth (can be a backdoor; also used for logging): "+trunc(pl,70), 2, "PAM-CFG");
-        if(mod.indexOf("pam_permit.so")>=0 && !PAM_AUTOLOGIN.test(pn)){
-          if(/sufficient/i.test(ctrl)) drift("pam.d/"+pn, "pam_permit.so as 'sufficient' in the auth stack - authentication can always succeed: "+trunc(pl,60), 3, "PAM-CFG");
-          else if(!seenDecider) drift("pam.d/"+pn, "pam_permit.so BEFORE any real auth module - authentication always succeeds: "+trunc(pl,60), 3, "PAM-CFG");
+        // v1.8: scan ALL four stacks (was auth-only) - pam_exec / an absolute module path is a backdoor on any phase
+        var sm=pl.match(/^(auth|account|password|session)\s+(\[[^\]]*\]|\S+)\s+(\S+)/); if(!sm) continue;
+        var stack=sm[1], ctrl=sm[2], mod=sm[3].toLowerCase();
+        if(/pam_exec\.so/.test(mod)) drift("pam.d/"+pn, "pam_exec.so on the '"+stack+"' stack runs a program during PAM "+stack+" (can be a backdoor; also used for logging): "+trunc(pl,80), 2, "PAM-CFG");
+        if(/^\//.test(mod) && mod.indexOf("/security/")<0) drift("pam.d/"+pn, "PAM module loaded by absolute path on '"+stack+"' from a non-standard location: "+trunc(mod,70), 2, "PAM-MOD");
+        if(stack==="auth"){
+          if(/pam_unix\.so.*\bnullok(?!_secure)\b/.test(pl)) drift("pam.d/"+pn, "pam_unix nullok - blank passwords accepted (sometimes a desktop default): "+trunc(pl,60), 1, "PAM-CFG");
+          if(mod.indexOf("pam_permit.so")>=0 && !PAM_AUTOLOGIN.test(pn)){
+            if(/sufficient/i.test(ctrl)) drift("pam.d/"+pn, "pam_permit.so as 'sufficient' in the auth stack - authentication can always succeed: "+trunc(pl,60), 3, "PAM-CFG");
+            else if(!seenDecider) drift("pam.d/"+pn, "pam_permit.so BEFORE any real auth module - authentication always succeeds: "+trunc(pl,60), 3, "PAM-CFG");
+          }
+          if(/pam_(unix|sss|ldap|krb5|deny|winbind)\.so/.test(mod)) seenDecider=true;
         }
-        if(/pam_(unix|sss|ldap|krb5|deny|winbind)\.so/.test(mod)) seenDecider=true;
       } } }catch(er2){} }
 }
 function drift(src, detail, score, tag){
@@ -3823,6 +3927,7 @@ function rescoreAll(){
   // against the current IOC list. hash_executables dormant hits are re-run in the sweep, not here.
   scoreLogons();
   for(i=0;i<PERSFIND.length;i++){ rescorePersFind(PERSFIND[i]); }
+  correlatePersistence();   // v1.8: persistence entry -> running process -> established public socket
   for(i=0;i<CONTAINERS.length;i++){ r=CONTAINERS[i]; r.tags=[]; r.reasons=[]; r.score=0;
     h=iocHit(r.blob); if(h){ r.score+=3; r.tags.push("IOC"); r.reasons.push("IOC hit: "+h); }
     if(r.deep){ for(var dc=0;dc<r.deep.length;dc++){ var cf=r.deep[dc]; r.score+=cf.s; r.tags.push(cf.tag); r.reasons.push(cf.reason); } } }
@@ -3837,10 +3942,23 @@ var IMPLANT_NAMES=["xmrig","kinsing","kdevtmpfsi","kthreaddi","tsunami","kaiten"
   "frpc","frps","gs-netcat","gsocket","meterpreter","cobaltstrike","pnscan","masscan","zmap","teamtnt",
   "cpuminer","minerd","xmr-stak","phpguard","redtail","perfcc","dnscat","icmpsh","tshd","prism",
   "iodine","dns2tcp","ptunnel","pupy","revsocks","villain","hoaxshell","nimplant","godoh","dnstt","dnscat2","stowaway"];
-function implantHit(s){ var n=lc(s); for(var i=0;i<IMPLANT_NAMES.length;i++){ if(n.indexOf(IMPLANT_NAMES[i])>=0) return IMPLANT_NAMES[i]; } return ""; }
+function reEsc(s){ return String(s).replace(/[.*+?^${}()|[\]\\\-]/g,"\\$&"); }
+/* v1.8: boundary-aware match (was an unbounded indexOf that fired on 'orbit' in 'korbit', etc.).
+   Returns {name, where} | null. where: 'basename' or 'path' (a program/path component = full
+   confidence) vs 'arg' (whole-word only in argument text = low confidence). The caller scores by
+   confidence, and the content-sweep gate only trusts basename/path matches. */
+function implantHit(s){ var lc2=lc(s), toks=lc2.split(/[\s'"();|&<>` ]+/), i, t, c;
+  for(t=0;t<toks.length;t++){ var tok=toks[t]; if(!tok) continue;
+    var comps=tok.split("/"), base=comps[comps.length-1].replace(/[=,].*$/,"");
+    for(i=0;i<IMPLANT_NAMES.length;i++){ var nm=IMPLANT_NAMES[i];
+      if(base===nm || base.indexOf(nm+".")===0 || base.indexOf(nm+"-")===0) return {name:nm, where:"basename"};
+      for(c=0;c<comps.length;c++){ if(comps[c]===nm) return {name:nm, where:"path"}; } } }
+  for(i=0;i<IMPLANT_NAMES.length;i++){ var nm2=IMPLANT_NAMES[i];
+    if(new RegExp("(^|[^a-z0-9_])"+reEsc(nm2)+"([^a-z0-9_]|$)").test(lc2)) return {name:nm2, where:"arg"}; }
+  return null; }
 /* v1.7: reverse-shell / backpipe / encoded-loader C2 tradecraft in a persistence command line.
    Returns [tag, score, reason] triples (deduped against already-present tags by the caller). */
-function c2Patterns(cmd){ var c=lc(cmd), out=[];
+function c2Patterns(cmd){ var c=lc(cmd), oc=String(cmd), out=[];
   if(/\/dev\/(tcp|udp)\/[0-9a-z.\-:\[\]]+\/\d+/.test(c)) out.push(["REVSHELL",3,"bash /dev/tcp|/dev/udp reverse shell (writes to a raw socket)"]);
   if(/mkfifo\b[\s\S]*\b(nc|ncat|sh|bash)\b/.test(c) || /mknod\s+\S+\s+p\b/.test(c)) out.push(["BACKPIPE",3,"named-pipe (mkfifo/mknod) backpipe reverse shell"]);
   if(/(^|\s)(nc|ncat)\b[^|;&]*\s-\w*e\w*\s/.test(c) || /\bsocat\b[\s\S]*exec:/.test(c)) out.push(["REVSHELL",3,"nc/socat spawning a shell (-e / EXEC:)"]);
@@ -3852,14 +3970,24 @@ function c2Patterns(cmd){ var c=lc(cmd), out=[];
   if(/\b(setsid|nohup|disown)\b[\s\S]*(\/dev\/tcp|\bnc\b|\bncat\b|\bsocat\b|python|perl)/.test(c)) out.push(["REVSHELL",2,"detached (setsid/nohup/disown) network process - beacon backgrounding"]);
   // v1.7.1: beacon cadence - a loop + sleep + a network primitive is a call-home tell no single token catches
   if(/(while\s+(true|:)|for\s*\(\s*;;|until\s+false)/.test(c) && /\bsleep\s+[0-9]/.test(c) && /(\/dev\/tcp|\bnc\b|\bncat\b|\bcurl\b|\bwget\b|\bsocat\b|\bopenssl\b)/.test(c)) out.push(["BEACON",2,"loop + sleep + network primitive - beaconing cadence (call-home)"]);
+  // v1.8: protocol tunnels / reverse-ingress (persistent SSH forwards, cloudflared/ngrok/tailscale/frp).
+  // The ssh -R/-D/-L check uses the ORIGINAL case so -L (local forward) isn't confused with -l (login user).
+  if(/\bautossh\b/i.test(oc) || /\bssh\b[^|;&\r\n]*\s-[a-zA-Z]*[RDL]/.test(oc)) out.push(["TUNNEL",2,"persistent SSH tunnel / port-forward (autossh, ssh -R/-D/-L)"]);
+  if(/\bcloudflared\b[\s\S]*tunnel/.test(c) || /\bngrok\b/.test(c) || /\btailscale\b[\s\S]*(funnel|serve)/.test(c) || /\bfrpc?\b\s+-c/.test(c)) out.push(["TUNNEL",2,"reverse-tunnel / ingress tool (cloudflared, ngrok, tailscale funnel, frp)"]);
+  // v1.8: more encoded-loader forms
+  if(/\bopenssl\s+enc\b[\s\S]*-d[\s\S]*\|\s*(ba|z)?sh/.test(c)) out.push(["ENC-LOADER",2,"openssl-decrypted payload piped into a shell"]);
+  if(/\beval\b[\s\S]*(base64\s+(-d|--decode)|base32\s+-d|xxd\s+-r|openssl\s+enc|gzip\s+-d|gunzip)/.test(c)) out.push(["ENC-LOADER",2,"eval of a decoded/decompressed payload"]);
   return out; }
 /* v1.7 / v1.7.1: pull the first hardcoded callback endpoint out of a persistence command line so a
    baked-in C2 address becomes a visible, geo-taggable finding. Handles IPv4, IPv6 and (only in a
    raw-socket context - /dev/tcp, nc/ncat/socat/telnet host port) a domain, to stay high-signal. */
+function validOctets(ip){ var o=String(ip).split("."); for(var i=0;i<o.length;i++){ if((parseInt(o[i],10))>255) return false; } return true; }
 function c2Classify(host, port){ host=String(host).replace(/^\[|\]$/g,"");
-  var isIp4=/^\d{1,3}(\.\d{1,3}){3}$/.test(host);
+  // v1.8: validate octets (<=255) and port (1-65535) so a version-like/invalid string never becomes C2-ADDR
+  if(port && ((parseInt(port,10))<1 || (parseInt(port,10))>65535)) port="";
+  var isIp4=/^\d{1,3}(\.\d{1,3}){3}$/.test(host) && validOctets(host);
   var isIp6=host.indexOf(":")>=0 && /^[0-9a-f:]+$/i.test(host) && host.length>3;
-  var isDom=!isIp4 && !isIp6 && /^[a-z0-9][a-z0-9\-]*(\.[a-z0-9\-]+)+\.[a-z]{2,}$/i.test(host);
+  var isDom=!isIp4 && !isIp6 && !/^\d/.test(host) && /^[a-z0-9][a-z0-9\-]*(\.[a-z0-9\-]+)+\.[a-z]{2,}$/i.test(host);
   return {ip:(isIp4||isIp6)?host:"", domain:isDom?host:"", port:(port||""), raw:host+(port?(":"+port):""), v6:isIp6}; }
 function extractC2Addr(cmd){ var s=String(cmd), m;
   // 1) bash /dev/tcp|/dev/udp - host may be IPv4, IPv6 or a domain
@@ -3884,7 +4012,7 @@ function rescorePersFind(r){
   if(/\b(curl|wget)\b/.test(lc(r.cmd)) && /https?:\/\//.test(lc(r.cmd))){ r.score+=1; r.tags.push("NET-FETCH"); r.reasons.push("fetches from a URL"); }
   // v1.7: RAT / C2 tradecraft lens - applies to every persistence command line, wherever found
   var impl=implantHit(r.blob);
-  if(impl){ r.score+=3; r.tags.push("IMPLANT"); r.reasons.push("references a known implant/RAT/miner/C2 name: "+impl); }
+  if(impl){ var isc=(impl.where==="arg")?1:3; r.score+=isc; r.tags.push("IMPLANT"); r.reasons.push("known implant/RAT/miner/C2 name '"+impl.name+"' ("+impl.where+" match"+(impl.where==="arg"?", lower confidence - appears only in argument text":"")+")"); }
   var c2h=c2Patterns(r.cmd);
   for(var ci=0;ci<c2h.length;ci++){ if(!hasTag(r,c2h[ci][0])){ r.score+=c2h[ci][1]; r.tags.push(c2h[ci][0]); r.reasons.push(c2h[ci][2]); } }
   var addr=extractC2Addr(r.cmd); r.addr="";
@@ -3892,6 +4020,38 @@ function rescorePersFind(r){
     if(!hasTag(r,"C2-ADDR")){ r.score+=2; r.tags.push("C2-ADDR"); r.reasons.push("hardcoded public callback address "+addr.raw+(addr.v6?" (IPv6)":"")+(geoTip(r.addr)?(" ["+geoTip(r.addr)+"]"):"")); } }
   else if(addr && addr.domain && !/(^|\.)(localhost|local|lan|internal|intranet|corp|home|arpa|test|example)$/i.test(addr.domain) && !hasTag(r,"C2-DOMAIN")){
     r.score+=1; r.tags.push("C2-DOMAIN"); r.reasons.push("hardcoded callback host "+addr.raw+" in a raw-socket command - verify the domain is expected"); }
+}
+/* v1.8: the highest-value correlation - follow a persistence entry to the file it runs and see if
+   that file is a LIVE process holding an established PUBLIC socket. A harmless-looking
+   ExecStart=/usr/local/bin/update-agent becomes high-confidence when its binary is running and
+   phoning home. Gated to NON-standard-bin absolute paths so legit /usr/sbin services aren't flagged
+   just for having a public connection, and common interpreters (a bare 'sh'/'python') are skipped. */
+var COMMON_INTERP=/^(sh|bash|dash|zsh|ksh|ash|python[0-9.]*|perl|ruby|php[0-9.]*|node|java|awk|sed|env|systemd|cron|crond|run-parts|true|false|echo|test)$/i;
+function isStdBin(path){ return /^\/(usr\/)?s?bin\//.test(path) || /^\/usr\/lib(exec)?\//.test(path) || /^\/lib(64)?\//.test(path); }
+function persExePath(r){ var c=trimStr(r.cmd); if(!c) return "";
+  var toks=c.split(/\s+/), i;
+  for(i=0;i<toks.length;i++){ var tk=toks[i]; if(tk==="") continue;
+    if(/^(sudo|nohup|setsid|exec|env|-\S*|@\S*|\+\S*|!\S*)$/.test(tk)) continue;   // wrappers, flags, systemd exec prefixes
+    if(/^[A-Za-z_][A-Za-z0-9_]*=/.test(tk)) continue;                              // ENV=val
+    return tk.replace(/^["']+/,""); }
+  return ""; }
+function correlatePersistence(){
+  if(!PERSFIND.length || !PROC.length) return;
+  var procByBase={}, i, b;
+  for(i=0;i<PROC.length;i++){ var p=PROC[i]; b=lc(procBase(p)); if(b){ (procByBase[b]||(procByBase[b]=[])).push(p); } }
+  var pubSockByPid={};
+  for(i=0;i<NET.length;i++){ var n2=NET[i];
+    if(n2.procPid && /^(ESTAB|ESTABLISHED)$/i.test(n2.state||"") && n2.peerAddr && !ipIsLocal(n2.peerAddr)){ (pubSockByPid[n2.procPid]||(pubSockByPid[n2.procPid]=[])).push(n2); } }
+  for(i=0;i<PERSFIND.length;i++){ var r=PERSFIND[i]; var exe=persExePath(r); if(!exe) continue;
+    if(exe.charAt(0)!=="/" || isStdBin(exe)) continue;   // only a non-standard-bin absolute path can be a renamed implant
+    var base=lc(exe.replace(/^.*\//,"")); if(!base || COMMON_INTERP.test(base)) continue;
+    var matches=procByBase[base]; if(!matches||!matches.length) continue;
+    var pid=matches[0].pid, socks=null, flagged=null, m2;
+    for(m2=0;m2<matches.length;m2++){ if(pubSockByPid[matches[m2].pid]){ socks=pubSockByPid[matches[m2].pid]; pid=matches[m2].pid; break; } if(matches[m2].score>=3 && !flagged) flagged=matches[m2]; }
+    if(!hasTag(r,"PERS-RUN")){ r.score+=1; r.tags.push("PERS-RUN"); r.reasons.push("persistence target '"+base+"' ("+trunc(exe,50)+") is a RUNNING process (pid "+pid+")"); }
+    if(socks){ r.score+=3; r.tags.push("PERS-C2"); r.reasons.push("persistence target is running (pid "+pid+") AND holds an established PUBLIC connection to "+socks[0].peerAddr+(geoTip(socks[0].peerAddr)?(" ["+geoTip(socks[0].peerAddr)+"]"):"")); if(!r.addr) r.addr=socks[0].peerAddr; }
+    else if(flagged && !hasTag(r,"PERS-SUSPROC")){ r.score+=2; r.tags.push("PERS-SUSPROC"); r.reasons.push("persistence target's running process (pid "+flagged.pid+") is itself flagged suspicious (score "+flagged.score+")"); }
+  }
 }
 function firstToken(s){ s=trimStr(String(s||"")); var sp=s.indexOf(" "); return sp>=0?s.substring(0,sp):s; }
 function isShellCmd(cmd){ var c=lc(cmd);
@@ -7038,6 +7198,7 @@ window.onload=function(){ init(); try{ window.setTimeout(checkSelfUpdate,600); }
       <li><b>Inventory tab</b> - a map of every key artifact (processes, network, logons, accounts, persistence, system, filesystem, logs, containers) showing present/absent, size, and an <b>open folder</b> link that opens the raw file in Explorer. The Persistence &amp; config inventory on Overview has the same open-folder links; click an artifact name there to view its contents inline.</li>
       <li><b>UI (v0.7):</b> the Processes table has a <b>Name</b> column and a <b>Tree view</b> toggle (collapsible parent/child hierarchy - click ▸/▾ to fold, a row for detail). <b>Logons</b> has User / Source / Result filters and a clickable link to each raw source log. <b>Events</b> has a min-score filter and a kind filter. Long tables keep their <b>header row frozen</b> while scrolling, and <b>Persistence &amp; system findings</b> shows a date/time column.</li>
       <li><b>Resizable columns</b> everywhere - drag the right edge of any column header (it highlights on hover); double-click the edge to reset. Widths persist per view.</li>
+      <li><b>Persistence: structural detection + correctness (v1.8.0):</b> a second external code review drove five fixes. <b>The structural win - correlation:</b> a persistence entry's executable is now followed to a running process and its sockets, so a harmless-looking <code>ExecStart=/usr/local/bin/update-agent</code> becomes high-confidence when that binary is <em>running and holds an established public connection</em> (<b>PERS-C2</b> +3, <b>PERS-RUN</b>/<b>PERS-SUSPROC</b> for the weaker cases). Gated to non-standard-bin paths so legit /usr/sbin services aren't flagged for having a connection. <b>systemd drop-ins</b>: unit dirs are now scanned recursively, so a malicious <code>ExecStart=</code> override in <code>&lt;unit&gt;.service.d/*.conf</code> (which systemd merges over the primary unit) is finally parsed; broader load-path coverage (<code>/run</code>, <code>/usr/local/lib</code>, XDG, <code>~/.local/share</code>); and <code>.path</code>/<code>.automount</code> <code>Unit=</code> + <code>.socket</code> <code>Service=</code> trigger targets. <b>Correctness fixes:</b> the <code>ForceCommand</code> sshd check was broken (tested for the literal word in the value, so it never fired) - now flags any non-<code>none</code> value; the implant-name match was an unbounded substring (fired on <code>orbit</code> in <code>korbit</code>) - now boundary-aware (basename/path = full score, argument text = low); and <b>C2-ADDR validates octets/ports</b> so a version-like or malformed string can't become a callout. <b>SSH auth-source blind spots:</b> <code>AuthorizedKeysCommand</code>, <code>AuthorizedPrincipalsCommand/File</code>, <code>TrustedUserCAKeys</code>, <code>PermitUserEnvironment</code>, <code>~/.ssh/environment</code>. <b>PAM</b> now scans the account/password/<b>session</b> stacks (a <code>session … pam_exec.so /path/payload</code> was previously missed) and flags absolute module paths. <b>cloud-init</b> <code>scripts/per-boot|per-instance|per-once</code> (per-boot runs every boot) and user-data runcmd/bootcmd; <b>D-Bus</b> service-activation <code>Exec=</code>. <b>Tunnels:</b> <code>autossh</code>, <code>ssh -R/-D/-L</code>, cloudflared/ngrok/tailscale/frp (<b>TUNNEL</b>), plus <code>openssl enc -d</code> and <code>eval "$(base64 -d …)"</code> loaders. <b>Transparency:</b> the persistence/config inventory now lists the new sweep locations, and files skipped for exceeding the 1 MB read cap are surfaced on Log Integrity instead of silently dropped.</li>
       <li><b>Persistence C2 detection - deeper coverage (v1.7.1):</b> a review of the v1.7.0 sweeps closed several gaps. <b>The big one:</b> the "hostile-lines-only" content sweeps (profile.d, cron/init.d/network scripts, per-user rc, histories) gated on <code>HIST_PREFILTER</code> alone, so a line the C2 lens <em>would</em> flag - an implant-by-name (<code>nohup /usr/local/bin/kinsing &amp;</code>) or a reverse-shell variant with no HIST_PREFILTER token - was dropped <em>before</em> scoring; the gate now also fires on <code>implantHit</code> and <code>c2Patterns</code>, so those lines surface and score. <b>New reverse-shell variants</b> in the C2 lens: <code>php fsockopen</code>, <code>ruby TCPSocket.new</code>, <code>gawk /inet/tcp</code>, <code>/dev/udp</code>, and a <b>beacon-cadence</b> heuristic (loop + <code>sleep</code> + a network primitive → <b>BEACON</b>). <b>C2-ADDR now covers IPv6 and domains</b> (a hardcoded domain callback in a raw-socket command → <b>C2-DOMAIN</b>; internal-looking names excluded). <b>New persistence vectors:</b> systemd <code>Environment=LD_PRELOAD</code> and <code>EnvironmentFile=</code> from a writable path, a <code>.socket</code> unit's network <code>ListenStream=</code>, systemd <b>generators</b> (<code>/etc/systemd/system-generators</code>), <code>/etc/ld.so.conf.d/*.conf</code> paths outside the standard lib dirs (<b>LDPATH</b>), and <code>authorized_keys</code> <code>environment=</code> injection. The implant watchlist gained DNS/ICMP-tunnel and modern-C2 names (iodine, dns2tcp, ptunnel, pupy, revsocks, villain, hoaxshell, nimplant, …).</li>
       <li><b>RAT / C2 persistence sweeps (v1.7.0):</b> the <b>Persistence</b> tab gained the hiding spots current Linux RAT/C2 write-ups flag that the earlier sweeps missed. <b>System-wide login execution</b>: <code>/etc/profile</code>, <code>/etc/profile.d/*.sh</code>, <code>/etc/bash.bashrc</code>, <code>/etc/zsh/*</code>, <code>/etc/environment</code> (the per-user rc sweep couldn't see these). <b>SSH-login hooks</b>: <code>/etc/ssh/sshrc</code> and per-user <code>~/.ssh/rc</code> - run on <em>every</em> inbound SSH session before the shell (a favourite stealthy trigger). <b>run-parts periodic cron</b>: <code>/etc/cron.{hourly,daily,weekly,monthly}</code> (non-stock scripts) + <code>/etc/anacrontab</code>. <b>Network-event triggers</b> (beacon-on-connectivity, boot-independent): <code>NetworkManager/dispatcher.d</code>, <code>if-up.d/if-post-up.d/if-down.d</code>, <code>dhclient-exit-hooks.d</code>, <code>ppp/ip-up.d</code>. <b>Boot/device autostart</b>: <code>/etc/modules</code> &amp; <code>modules-load.d</code> (kernel-module autoload), <code>udev</code> rules with <code>RUN+=</code>/<code>PROGRAM=</code>, <code>binfmt_misc</code> handlers. <b>Legacy/other</b>: <code>/etc/rc.d/rc.local</code> (RHEL), <code>/etc/init.d</code> scripts, <code>at</code> jobs. On top of the locations, <b>every persistence command line now gets a RAT/C2 tradecraft lens</b>: reverse-shell / <code>mkfifo</code> backpipe / <code>nc -e</code> / <code>socat EXEC</code> / scripting-language connect-backs / openssl-wrapped shells (<b>REVSHELL</b>/<b>BACKPIPE</b> +3), base64/hex payloads piped to a shell (<b>ENC-LOADER</b> +2), a <b>known-implant/RAT/miner/C2 name watchlist</b> (xmrig, kinsing, bpfdoor, sliver, mythic, chisel, frpc, meterpreter, … → <b>IMPLANT</b> +3), and <b>hardcoded public callback IPs</b> baked into a cron job or unit (<b>C2-ADDR</b> +2, geo-tagged). New persistence tags carry ATT&amp;CK mappings; IMPLANT and C2-ADDR are treated as indicators (unmapped), consistent with the no-overclaim doctrine.</li>
       <li><b>Security tab (v1.6.0):</b> a new <b>Security</b> tab runs an automated assessment over everything already parsed - no re-reading, computed fresh each view. Two halves: <b>compromise-indicator correlations</b> that join data across tabs (brute-force that <em>succeeded</em>, interactive/root logins from public IPs or outside business hours, reverse-shell/scanner/offensive-tool execution, the download→chmod+x chain, anti-forensics, account creation from a shell, persistence files modified <em>after</em> the first suspicious logon, data staging/exfil, an SSH key authorized on multiple accounts, null-passphrase private keys, timestomp candidates, logins from multiple countries), and a <b>hardening-posture checklist</b> (sshd root-login / password-auth / empty-passwords, PAM auth-stack weaknesses, extra UID-0 and duplicate-UID accounts, blank-password accounts, password aging (login.defs), service accounts with shells, sudoers NOPASSWD grants, SSH extras (X11Forwarding / MaxAuthTries / PermitUserEnvironment), privileged/host-namespace containers, auditd presence, <b>firewall enabled/disabled</b> (ufw status / ufw.conf / firewalld) plus the ruleset-vs-0.0.0.0-listeners check, <b>non-standard listening services</b> on externally-reachable interfaces (the "why is velociraptor on 8000" check), SELinux/AppArmor state, kernel-hardening sysctls (ASLR, fs.suid_dumpable, SYN cookies, ip_forward-vs-containers), /tmp noexec+nosuid, NTP clock sync (evidence integrity), patch recency, non-baseline SUID/world-writable/capabilities, EOL distro, docker/sudo/wheel membership) - retitled <b>OS Hardening Posture</b> - and a third table, <b>Apache Hardening Posture</b>: CIS Apache 2.4-inspired checks over the ENABLED configuration in /etc/apache2 | /etc/httpd (ServerTokens/ServerSignature, TraceEnable, run-as user, directory listing, mod_status exposure, risky modules incl. WebDAV/CGI/autoindex, TLS presence + deprecated protocols, AllowOverride All, logging). The <b>Apache logs</b> tab is renamed <b>Apache Web Server</b> and opens with an <b>Apache Configuration</b> section - the key effective directives with at-a-glance review chips - above the access logs; the HTML report mirrors both. Every check reads <b>PASS / WARN / FAIL</b>, or <b>N/A</b> when the source artifact wasn't collected (so a logs-only or non-root capture never shows a false all-clear); a banner rolls up the counts, rows sort worst-first, clicking a finding pivots the Timeline or jumps to the source tab, and it exports to CSV and into the HTML report. Findings are heuristic leads to confirm, not verdicts.</li>
