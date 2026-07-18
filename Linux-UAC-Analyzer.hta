@@ -366,6 +366,8 @@
           <span class="mdwrap" data-udrop="1"><button class="btn" id="logfResultBtn" data-udrop="1" onclick="mdToggleBtn('logfResult')">result: all ▾</button><div id="logfResultPanel" class="hide mdpanel" data-udrop="1"></div></span>
           <button class="btn" id="logonByIpBtn" title="Aggregate logons per source IP: first/last seen, failure + success counts, users tried, geo/ASN. The fastest brute-force triage view. (v0.11)">By source IP</button>
           <label style="font-size:12px" title="lastlog rows are per-account STATE (one row per account's most recent login), not events - they now live on the Users tab. Untick to mix them back into this event list."><input type="checkbox" id="logfHideLastlog" checked> hide lastlog rows</label></span>
+        <span id="bruteWrap" class="hide"><span class="sep"></span>
+          <label style="font-size:12px" title="Show only brute-force activity: on Logons, failures and the eventual success from any source IP with 5+ failed attempts (SPRAY / BRUTEWIN); on Audit, failed USER_AUTH/USER_LOGIN records from a source with 5+ failures."><input type="checkbox" id="bruteOnly"> brute-force only</label></span>
         <span id="dateWrap" class="hide"><span class="sep"></span>
           <input class="txt mono" id="dfrom" placeholder="from YYYY-MM-DD" style="width:140px" title="Filter timeline by mtime/ctime/crtime (UTC)">
           <span class="muted">&rarr;</span>
@@ -400,7 +402,7 @@
 <script language="JScript">
 "use strict";
 
-var APP_VERSION = "1.2.0";
+var APP_VERSION = "1.3.0";
 /* v0.9.4 - SQLECmd wrapper: offer to DOWNLOAD instead of hunt for it (operator request):
    - if the wrapper isn't found anywhere, a hand-off now offers to download the latest
      SQLECmd-Wrapper.hta from GitHub into THIS app's folder (browse stays as the offline
@@ -1990,12 +1992,19 @@ var SVC_ACCOUNTS={ "daemon":1,"bin":1,"sys":1,"sync":1,"games":1,"man":1,"lp":1,
   "messagebus":1,"sshd":1,"ftp":1,"mysql":1,"postgres":1,"redis":1,"mongodb":1,"nginx":1,"apache":1,
   "postfix":1,"ntp":1,"bind":1,"tss":1,"_apt":1,"tcpdump":1,"landscape":1 };
 function svcAccount(u){ u=lc(String(u||"").replace(/\s*\(uid[^)]*\)\s*/,"").replace(/^\(invalid\)\s*/,"")); return SVC_ACCOUNTS[u]===1; }
+/* v1.3: brute-force threshold (failures from one source) - matches the SPRAY/BRUTEWIN scoring */
+var BRUTE_THRESH=5;
+/* a logon row is brute-force-related if it's a spray/win-tagged row, or ANY row (fail or the
+   eventual success) from a source IP that produced >= BRUTE_THRESH failures */
+function isBruteLogon(r){ if(!r) return false;
+  return hasTag(r,"SPRAY")||hasTag(r,"BRUTEWIN")||((r.ipFailCount||0)>=BRUTE_THRESH); }
 function scoreLogons(){
   // pre-pass: per-source-IP failure counts
   var failByIp={}, i, r;
   for(i=0;i<LOGON.length;i++){ r=LOGON[i];
     if(r.result==="failed" && r.ip) failByIp[r.ip]=(failByIp[r.ip]||0)+1; }
   for(i=0;i<LOGON.length;i++){ r=LOGON[i]; r.tags=[]; r.reasons=[]; r.score=0;
+    r.ipFailCount=(r.ip?(failByIp[r.ip]||0):0);   // v1.3: drives the brute-force filter
     var h=iocHit(r.blob);
     if(h){ r.score+=3; r.tags.push("IOC"); r.reasons.push("IOC/keyword hit: "+h); }
     var ext=(r.ip && !ipIsLocal(r.ip));
@@ -4013,15 +4022,30 @@ var ACOLS=[
   {h:"Source IP", tip:"addr= field on auth records - geo chip when enrichment is on", sk:function(r){return lc(r.ip);}, cell:function(r){return '<td class="mono" title="'+esc(geoTip(r.ip))+'">'+esc(r.ip||"-")+geoTag(r.ip)+'</td>';}},
   {h:"Detail", tip:"EXECVE: full argv (hex-encoded args decoded) / auth: event + result + terminal", sk:function(r){return lc(r.detail);}, cell:function(r){return '<td class="mono" title="'+esc(r.detail)+'">'+esc(trunc(r.detail,110))+'</td>';}}
 ];
+/* v1.3: auditd auth-failure sources with >= BRUTE_THRESH failures (source IP, else acct) */
+function auditBruteSet(){
+  var fc={}, i; for(i=0;i<AUDITX.length;i++){ var r=AUDITX[i];
+    if(r.typ==="EXECVE" || !r.res || r.res==="success") continue;
+    var src=r.ip||r.user||""; if(src) fc[src]=(fc[src]||0)+1; }
+  var set={}, k; for(k in fc){ if(fc.hasOwnProperty(k) && fc[k]>=BRUTE_THRESH) set[k]=fc[k]; } return set;
+}
+function isBruteAudit(r, set){
+  if(r.typ==="EXECVE" || !r.res || r.res==="success") return false;
+  return !!set[r.ip||r.user||""];
+}
 function renderAudit(){
+  var brute=false; try{ brute=$("bruteOnly").checked; }catch(eb){}
+  var bset=brute?auditBruteSet():null;
   var rows=[]; for(var i=0;i<AUDITX.length;i++){ var r=AUDITX[i];
     if(!passQ(r)) continue;
+    if(brute && !isBruteAudit(r,bset)) continue;   // v1.3: brute-force only (repeated failed auth)
     if((DFROM||DTO) && r.epoch && !inDay(logonDay(r.epoch))) continue;
     rows.push(r); }
   sortRows(rows,ACOLS,SORT.audit); drawTable(ACOLS,rows,SORT.audit,"audit");
   if(!AUDITX.length){
     $("tbl").innerHTML='<thead><tr><th>auditd records</th></tr></thead><tbody><tr><td class="muted">No auditd logs in this capture ([root]/var/log/audit/audit.log). Only hosts running auditd produce these - when present this is the closest Linux gets to process-creation telemetry (execve + login records).</td></tr></tbody>';
     $("count").innerHTML="0 rows"; return; }
+  if(brute) $("count").innerHTML+=' · <span class="tag sus">brute-force only</span> (failed auth from a source with '+BRUTE_THRESH+'+ failures)';
   if(AUDITCAP.total>AUDITCAP.shown) $("count").innerHTML+=' · <span class="tag sus">capped: '+nf(AUDITCAP.shown)+' of '+nf(AUDITCAP.total)+' stored</span>';
 }
 /* v1.1: SSH key inventory table */
@@ -4149,6 +4173,7 @@ function setTab(t, quiet){
   showEl("dateWrap", t==="time" || t==="logon" || t==="web" || t==="audit" || t==="actions");
   showEl("tzWrap", t==="time" || t==="logon" || t==="web" || t==="audit" || t==="users" || t==="actions");   // v0.16: Users has last-login times; v1.2: Actions has command times
   showEl("actFilters", t==="actions");   // v1.2
+  showEl("bruteWrap", t==="logon" || t==="audit");   // v1.3: brute-force filter
   showEl("procTreeWrap", t==="proc");
   showEl("procSusWrap", t==="proc");                         // v0.16
   showEl("logonFilters", t==="logon");
@@ -4803,12 +4828,15 @@ function keysOf(o){ var a=[],k; for(k in o){ if(o.hasOwnProperty(k)&&k) a.push(k
 function renderLogon(){
   renderLateral();   // v0.14: outbound-SSH evidence panel sits above the logon table
   // v0.11: aggregate-by-source-IP view (brute-force triage) - same table chrome, different columns
+  var brute=false; try{ brute=$("bruteOnly").checked; }catch(eb){}
   if(LOGON_BYIP){
     var arows=[], agg=buildLogonByIp();
-    for(var a2=0;a2<agg.length;a2++){ if(passQ(agg[a2])) arows.push(agg[a2]); }
+    for(var a2=0;a2<agg.length;a2++){ if(!passQ(agg[a2])) continue;
+      if(brute && agg[a2].fails<BRUTE_THRESH) continue;   // v1.3: brute sources = 5+ failures
+      arows.push(agg[a2]); }
     sortRows(arows,LIPCOLS,SORT.logonip); drawTable(LIPCOLS,arows,SORT.logonip,"logonip");
     if(!agg.length){ $("tbl").innerHTML='<thead><tr><th>Logons by source IP</th></tr></thead><tbody><tr><td class="muted">No logon rows carry a source IP in this capture.</td></tr></tbody>'; $("count").innerHTML="0 rows"; }
-    else $("count").innerHTML+=" · aggregated from "+nf(LOGON.length)+" logon rows - click a row for detail, By source IP again for the flat view";
+    else $("count").innerHTML+=(brute?" · brute-force sources only (5+ failures)":"")+" · aggregated from "+nf(LOGON.length)+" logon rows - click a row for detail, By source IP again for the flat view";
     return;
   }
   populateLogonFilters();
@@ -4816,6 +4844,7 @@ function renderLogon(){
   var frSel=mdSet("logfResult"), llHidden=0;
   var rows=[]; for(var i=0;i<LOGON.length;i++){ var r=LOGON[i];
     if(!passQ(r)) continue;
+    if(brute && !isBruteLogon(r)) continue;                 // v1.3: brute-force-only
     if(!mdPass("logfUser", trimStr(r.user))) continue;      // v0.17 multiselects
     if(!mdPass("logfSrc", logonSrcType(r))) continue;
     if(!mdPass("logfResult", r.result)) continue;
@@ -4825,7 +4854,8 @@ function renderLogon(){
     if((DFROM||DTO) && r.epoch){ if(!inDay(logonDay(r.epoch))) continue; }   // case window filters logons too
     rows.push(r); }
   sortRows(rows,LCOLS,SORT.logon); drawTable(LCOLS,rows,SORT.logon,"logon");
-  if(llHidden) $("count").innerHTML+=' · '+nf(llHidden)+' lastlog state rows hidden <span class="muted">(Users tab shows them; untick "hide lastlog rows" to mix them in)</span>';
+  if(brute && LOGON.length) $("count").innerHTML+=' · <span class="tag sus">brute-force only</span> (failures + the eventual success from any IP with '+BRUTE_THRESH+'+ failures)';
+  if(llHidden && !brute) $("count").innerHTML+=' · '+nf(llHidden)+' lastlog state rows hidden <span class="muted">(Users tab shows them; untick "hide lastlog rows" to mix them in)</span>';
   if(!LOGON.length){ $("tbl").innerHTML='<thead><tr><th>Logons</th></tr></thead><tbody><tr><td class="muted">No auth.log / wtmp / btmp / lastlog / last / lastb events in this capture. Empty on hosts with no interactive logins (e.g. WSL); on a server this view fills with SSH, sudo, pkexec, pam session and account-change events.</td></tr></tbody>'; $("count").innerHTML="0 rows"; }
   else if(CRON_SESSIONS>0){ $("count").innerHTML+=' · '+nf(CRON_SESSIONS)+' root-cron pam sessions hidden as noise'; }
 }
@@ -5567,6 +5597,7 @@ function activeFilterDesc(){
     if($("evHideTool").checked) f.push("TOOLING hidden"); }catch(e3){}
   if(mdSet("evKind")) f.push("events kind in ["+mdDesc("evKind")+"]");
   if(mdSet("actUser")) f.push("actions user in ["+mdDesc("actUser")+"]");
+  try{ if($("bruteOnly").checked) f.push("brute-force only (Logons/Audit)"); }catch(ebd){}
   if(EVQ) f.push('events search "'+EVQ+'"');
   if(EVFROM||EVTO) f.push("events window");
   if(PIVOT) f.push("timeline pivot ±15 min @ "+fmtTime(PIVOT.center,true));
@@ -5860,6 +5891,7 @@ function init(){
   $("usersDropBtn").onclick=function(){ var p=$("usersDropPanel"); showEl("usersDropPanel", /\bhide\b/.test(p.className)); };
   $("usersSelClear").onclick=function(){ USERS_SEL={}; renderUsersDropBtn(); render(); };
   $("logfHideLastlog").onclick=function(){ render(); };  // v0.15
+  $("bruteOnly").onclick=function(){ render(); };        // v1.3
   $("pfMinScore").onchange=function(){ render(); };      // v0.16
   $("pkgSusOnly").onclick=function(){ render(); };       // v0.17
   $("usersEnabledOnly").onclick=function(){ render(); }; // v0.17
@@ -5868,7 +5900,7 @@ function init(){
   $("dto").onchange=function(){ DTO=dayNum(this.value); if(LASTROOT){ reparseTimeline(); } };
   $("clearBtn").onclick=function(){ $("q").value=""; QUERY=""; $("susOnly").checked=false; SUSONLY=false;
     mdClearAll(); USERS_SEL={}; renderUsersDropBtn();   // v0.17: clears every multiselect filter too
-    try{ $("netPubOnly").checked=false; }catch(e){} render(); };
+    try{ $("netPubOnly").checked=false; }catch(e){} try{ $("bruteOnly").checked=false; }catch(e2){} render(); };
   $("exportBtn").onclick=exportView;
   $("copyBtn").onclick=copyNotes;
 
@@ -5988,6 +6020,7 @@ window.onload=function(){ init(); try{ window.setTimeout(checkSelfUpdate,600); }
       <li><b>Inventory tab</b> - a map of every key artifact (processes, network, logons, accounts, persistence, system, filesystem, logs, containers) showing present/absent, size, and an <b>open folder</b> link that opens the raw file in Explorer. The Persistence &amp; config inventory on Overview has the same open-folder links; click an artifact name there to view its contents inline.</li>
       <li><b>UI (v0.7):</b> the Processes table has a <b>Name</b> column and a <b>Tree view</b> toggle (collapsible parent/child hierarchy - click ▸/▾ to fold, a row for detail). <b>Logons</b> has User / Source / Result filters and a clickable link to each raw source log. <b>Events</b> has a min-score filter and a kind filter. Long tables keep their <b>header row frozen</b> while scrolling, and <b>Persistence &amp; system findings</b> shows a date/time column.</li>
       <li><b>Resizable columns</b> everywhere - drag the right edge of any column header (it highlights on hover); double-click the edge to reset. Widths persist per view.</li>
+      <li><b>Brute-force filter (v1.3):</b> a <b>brute-force only</b> checkbox on <b>Logons</b> and <b>Audit</b>. On Logons it shows the failures and the eventual success from any source IP with 5+ failed attempts (the SPRAY / BRUTEWIN picture), and on the <b>By source IP</b> view it narrows to just those brute sources. On Audit it shows failed <code>USER_AUTH</code>/<code>USER_LOGIN</code> records from a source that failed 5+ times. One click isolates a password-guessing campaign and the account/IP that eventually got in.</li>
       <li><b>Actions tab (v1.2):</b> the complete <b>executed-command history</b> - every line from each user's bash/zsh/sh history (not just the hostile ones the Persistence tab keeps), <b>timestamped</b> where the shell recorded times (bash <code>HISTTIMEFORMAT</code> "#epoch" lines, zsh extended-history), and scored with the command heuristics (IOC, temp-path exec, decoder/interactive shell, pipe-to-shell, URL fetch, anti-forensics, elevation). Per-user multiselect filter, case-window and host-TZ aware, click a timestamped row to <b>pivot the Timeline ±15 min</b>. Answers "what did they actually type on this box." Exports to CSV and appears in the report.</li>
       <li><b>SSH Keys tab (v1.1):</b> a dedicated inventory of the key material in the capture - <b>authorized_keys</b> entries (who can log IN, with source-restriction and forced-command flags), per-user <b>identity keys</b> (id_* private/public, with passphrase state), and <b>host keys</b> from /etc/ssh. A short key-id (base64 head…tail) lets you match the same key across accounts by eye; a <b>null-passphrase private key</b> is flagged (usable as-is if exfiltrated), as is an <b>unrestricted</b> or <b>forced-command</b> authorized_keys entry. Exports to CSV and appears in the report.</li>
       <li><b>1.0 (2026-07-18):</b> the app is now the <b>Linux UAC Capture Analyzer</b> (file: <code>Linux-UAC-Analyzer.hta</code>, repo: <code>bpmorris22/Linux-UAC-Capture-Analyzer</code>) - the "Linux" in the name is honest scoping: binary utmp decode and several parsers are Linux-specific, and non-Linux captures degrade gracefully to text sources with integrity notes. Sidecar filenames (<code>UAC-Triage-Tool.sqlecmd.txt</code>/<code>.colw.txt</code>) and the <code>_Processed\&lt;host&gt;\UAC</code> output convention are unchanged for continuity. Everything from v0.10-v0.17 ships in this release.</li>
