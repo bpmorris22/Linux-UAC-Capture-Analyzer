@@ -234,6 +234,8 @@
       </div>
       <!-- v0.14: boots table surfaced here (was on the Logs tab) - boot cadence is capture context -->
       <div id="ovBoots"></div>
+      <!-- v0.15: cloud-init provisioning baseline (was on the Logs tab) - capture context too -->
+      <div id="ovCloud"></div>
     </div>
 
     <!-- PERSISTENCE (v0.13: own tab - was two sections on the Overview) -->
@@ -332,7 +334,8 @@
           <select id="logfUser" title="Filter by user"><option value="">user: all</option></select>
           <select id="logfSrc" title="Filter by source artifact"><option value="">source: all</option></select>
           <select id="logfResult" title="Filter by result"><option value="">result: all</option></select>
-          <button class="btn" id="logonByIpBtn" title="Aggregate logons per source IP: first/last seen, failure + success counts, users tried, geo/ASN. The fastest brute-force triage view. (v0.11)">By source IP</button></span>
+          <button class="btn" id="logonByIpBtn" title="Aggregate logons per source IP: first/last seen, failure + success counts, users tried, geo/ASN. The fastest brute-force triage view. (v0.11)">By source IP</button>
+          <label style="font-size:12px" title="lastlog rows are per-account STATE (one row per account's most recent login), not events - they now live on the Users tab. Untick to mix them back into this event list."><input type="checkbox" id="logfHideLastlog" checked> hide lastlog rows</label></span>
         <span id="dateWrap" class="hide"><span class="sep"></span>
           <input class="txt mono" id="dfrom" placeholder="from YYYY-MM-DD" style="width:140px" title="Filter timeline by mtime/ctime/crtime (UTC)">
           <span class="muted">&rarr;</span>
@@ -367,7 +370,7 @@
 <script language="JScript">
 "use strict";
 
-var APP_VERSION = "0.14.0";
+var APP_VERSION = "0.15.0";
 /* v0.9.4 - SQLECmd wrapper: offer to DOWNLOAD instead of hunt for it (operator request):
    - if the wrapper isn't found anywhere, a hand-off now offers to download the latest
      SQLECmd-Wrapper.hta from GitHub into THIS app's folder (browse stays as the offline
@@ -802,7 +805,7 @@ function pollDone(ctx){
    an actual hang, not just a long step. */
 var PROCPILL={ timer:null, t0:0, label:"" };
 var PERF=[];                 // [{step,ms,err}] for the current run
-var PARSE_T0=0, EXTRACT_T0=0, EXTRACT_MS=0;
+var PARSE_T0=0, EXTRACT_T0=0, EXTRACT_MS=0, PARSE_MS=0;
 function fmtDur(ms){ if(ms<0) ms=0; var s=Math.floor(ms/1000); var m=Math.floor(s/60);
   return m+":"+p2n(s%60); }
 function startProcPill(label){
@@ -1171,6 +1174,7 @@ function parseCapture(root, input){
       ["lsof",                       function(){ parseLsof(root); }],
       ["process tree",               function(){ buildProcTree(); }],
       ["network (ss)",               function(){ parseNetwork(root); }],
+      ["network identity (ip addr)", function(){ parseNetIdent(root); }],
       ["logons (auth/wtmp/lastlog)", function(){ parseLogons(root); }],
       ["bodyfile timeline",          function(){ parseBodyfile(root); }],
       ["packages",                   function(){ parsePackages(root); }],
@@ -1222,6 +1226,7 @@ function runParseSteps(steps, i, root, input){
 }
 function finishParse(root, input){
   try{
+    PARSE_MS=new Date().getTime()-PARSE_T0;   // v0.15: available to the first render (Run metadata perf row)
     maybeEnrichGeo();             // v0.11: async geo/ASN for public IPs (online toggle; offline.txt wins)
     // provenance + summary
     var produced=[];
@@ -1235,6 +1240,7 @@ function finishParse(root, input){
     render();
     // perf summary: every step, plus extraction and totals - the block to copy into a perf report
     var parseMs=new Date().getTime()-PARSE_T0, failed=0, slow=null, pl=[], pi;
+    PARSE_MS=parseMs;   // v0.15: shown in Run metadata (Analysis performance)
     pl.push("[perf] ---- run timing summary ----");
     if(EXTRACT_MS) pl.push("[perf] extraction: "+nf(EXTRACT_MS)+" ms ("+fmtDur(EXTRACT_MS)+")");
     for(pi=0;pi<PERF.length;pi++){ var pp=PERF[pi];
@@ -3475,6 +3481,56 @@ function parseModulesCheck(root){
   }
 }
 
+/* ---- v0.15: network identity - "which box am I looking at" from ip addr / ifconfig ---- */
+var NETIDENT=[];
+function parseNetIdent(root){
+  NETIDENT=[];
+  var ls=readLines(firstFile(root,["live_response/network/ip_addr.txt","live_response/network/ip_a.txt","live_response/network/ifconfig_-a.txt","live_response/network/ifconfig.txt"]));
+  if(!ls.length) return;
+  var cur=null, i, m;
+  for(i=0;i<ls.length;i++){ var ln=ls[i];
+    m=ln.match(/^\d+:\s+([^:@\s]+)(?:@\S+)?:\s+</);   // `ip addr` interface header
+    if(m){ cur={iface:m[1], mac:"", ips:[]}; NETIDENT.push(cur); continue; }
+    if(ln.charAt(0)!==" " && ln.charAt(0)!=="\t"){    // ifconfig interface header
+      m=ln.match(/^([A-Za-z0-9@._\-]+):?\s+(flags=|Link encap)/);
+      if(m){ cur={iface:m[1].replace(/:$/,""), mac:"", ips:[]}; NETIDENT.push(cur); continue; }
+    }
+    if(!cur) continue;
+    m=ln.match(/(?:link\/ether|ether|HWaddr)\s+([0-9a-fA-F:]{17})/);
+    if(m){ cur.mac=m[1].toLowerCase(); continue; }
+    m=ln.match(/inet6?\s+(?:addr:\s*)?([0-9a-fA-F.:]+)(\/\d+)?/);
+    if(m && cur.ips.length<4){ var a2=m[1];
+      if(!/^(127\.|::1$)/.test(a2) && a2.toLowerCase().indexOf("fe80")!==0) cur.ips.push(a2+(m[2]||"")); }
+  }
+  var out=[]; for(i=0;i<NETIDENT.length;i++){ var n2=NETIDENT[i];
+    if(/^(lo|lo0)$/i.test(n2.iface)) continue;
+    if(n2.ips.length||n2.mac) out.push(n2); }
+  NETIDENT=out;
+}
+/* v0.15: earliest/latest plausible activity timestamp across all datasets - "what date range can
+   this capture actually speak to" (and what /from /to to set) */
+function activityWindow(){
+  var lo=0, hi=0, cap=(captureEpoch()||Math.floor(new Date().getTime()/1000))+172800, i;
+  function c(ep){ if(!ep || ep<946684800 || ep>cap) return; if(!lo||ep<lo) lo=ep; if(ep>hi) hi=ep; }
+  for(i=0;i<LOGON.length;i++) c(LOGON[i].epoch);
+  for(i=0;i<EVENTS.length;i++) c(EVENTS[i].epoch);
+  for(i=0;i<WEBLOG.length;i++) c(WEBLOG[i].epoch);
+  for(i=0;i<AUDITX.length;i++) c(AUDITX[i].epoch);
+  for(i=0;i<TIMEL.length;i++){ c(TIMEL[i].mtime); c(TIMEL[i].crtime); }
+  return lo?{from:lo, to:hi}:null;
+}
+/* v0.15: the public IPs this host talked with most (connections + logons + web requests) */
+function topTalkers(){
+  var cnt={}, i, k;
+  function add(ip){ ip=trimStr(ip||""); if(!ip||ipIsLocal(ip)) return; cnt[ip]=(cnt[ip]||0)+1; }
+  for(i=0;i<NET.length;i++) add(NET[i].peerAddr);
+  for(i=0;i<LOGON.length;i++) add(LOGON[i].ip);
+  for(i=0;i<WEBLOG.length;i++) add(WEBLOG[i].ip);
+  var a=[]; for(k in cnt){ if(cnt.hasOwnProperty(k)) a.push({ip:k, n:cnt[k]}); }
+  a.sort(function(x,y){ return y.n-x.n; });
+  return a.slice(0,5);
+}
+
 /* ---- pivot: anchor-and-expand from any timestamped row into the filesystem timeline ---- */
 function pivotTimeline(ep){
   ep=parseInt(ep,10)||0;
@@ -3731,6 +3787,14 @@ function renderOverview(){
   h+=kvRow("Command line", META.cmdLine);
   if(META.elapsed) h+=kvRow("Collection took", META.elapsed+" s");
   h+=kvRow("Collector commands", META.cmdTotal+(META.failed?("  ("+META.failed+" failed/timed out)"):""));
+  // v0.15: activity window, network identity, analysis performance
+  var aw=activityWindow();
+  if(aw) h+=kvRow("Observable activity", fmtTime(aw.from,false)+" to "+fmtTime(aw.to,false)+" "+tzLabel()+" ("+nf(Math.max(1,Math.round((aw.to-aw.from)/86400)))+" days) - what /from /to can usefully cover");
+  for(var ni=0;ni<NETIDENT.length && ni<6;ni++){ var nid=NETIDENT[ni];
+    h+=kvRow("iface "+nid.iface, (nid.ips.join(", ")||"-")+(nid.mac?("  ·  "+nid.mac):"")); }
+  if(NETIDENT.length>6) h+=kvRow("ifaces", "+"+(NETIDENT.length-6)+" more (see live_response/network/ip_addr.txt)");
+  if(PARSE_MS||EXTRACT_MS){ var pfF=0; for(var pf9=0;pf9<PERF.length;pf9++) if(PERF[pf9].err) pfF++;
+    h+=kvRow("Analysis performance", (EXTRACT_MS?("extract "+fmtDur(EXTRACT_MS)+" + "):"")+"parse "+fmtDur(PARSE_MS)+(pfF?("  ·  "+pfF+" parser step(s) FAILED - see the log"):"")); }
   $("ovMeta").innerHTML=h;
 
   var pf=flaggedCount(PROC), nfl=flaggedCount(NET), lf=flaggedCount(LOGON), tf=flaggedCount(TIMEL), pff=flaggedCount(PERSFIND);
@@ -3759,6 +3823,12 @@ function renderOverview(){
   if(BROWSERDBS.length) s+='<span class="stat" data-gotab="browser" style="cursor:pointer" title="Click to open the Browser tab (SQLECmd hand-off)"><span class="n">'+nf(BROWSERDBS.length)+'</span><span class="l">browser DBs</span></span>';
   if(META.failed) s+=statCard(nf(META.failed),"failed cmds","warn");
   $("ovStats").innerHTML=s;
+  // v0.15: top external talkers (connections + logons + web requests per public IP)
+  var tks=topTalkers();
+  if(tks.length){ var th3=['<div style="font-size:11px;margin-top:8px"><span class="muted" title="Public IPs with the most connections + logon events + web requests in this capture">Top external IPs: </span>'];
+    for(var t9=0;t9<tks.length;t9++){ var tk=tks[t9];
+      th3.push('<span class="mono">'+esc(tk.ip)+'</span>'+geoTag(tk.ip)+'<span class="muted"> ('+nf(tk.n)+')</span>'+(t9<tks.length-1?'<span class="muted"> · </span>':'')); }
+    th3.push('</div>'); $("ovStats").innerHTML+=th3.join(""); }
   // ATT&CK coverage: distinct techniques across all flagged rows
   var techSeen={}, techList=[];
   function collectTech(arr,thr){ for(var z=0;z<arr.length;z++){ if(arr[z].score>=thr){ var tt=techsForTags(arr[z].tags||[]);
@@ -3804,6 +3874,22 @@ function renderOverview(){
   // v0.14: lateral movement renders on the Logons tab; boots render here
   $("ovSar").innerHTML=sarSummaryHtml();
   $("ovBoots").innerHTML=bootsHtml();
+  $("ovCloud").innerHTML=cloudInitHtml();   // v0.15
+}
+/* v0.15: cloud-init provisioning baseline (moved from the Logs tab - it's capture context) */
+function cloudInitHtml(){
+  if(!CLOUDINIT) return "";
+  var c=CLOUDINIT, H=[];
+  H.push('<h3 style="margin-top:14px">Cloud-init provisioning baseline</h3><div class="kvgrid">');
+  H.push(kvRow("First boot", c.firstBoot));
+  if(c.ds) H.push(kvRow("Datasource", c.ds));
+  if(c.ip) H.push(kvRow("Provisioned IP", c.ip+(c.mask?("  /  "+c.mask):"")));
+  if(c.mac) H.push(kvRow("MAC", c.mac));
+  if(c.hostname) H.push(kvRow("Hostname set", c.hostname));
+  H.push(kvRow("User-data scripts ran", c.userData?"YES - review /var/lib/cloud for the script":"no"));
+  H.push(kvRow("SSH keys injected at provision", c.keys?(nf(c.keys)+" event(s)"):"none seen"));
+  H.push('</div>');
+  return H.join("");
 }
 /* v0.14: journalctl --list-boots table (moved from the Logs tab - boot cadence is capture context) */
 function bootsHtml(){
@@ -4155,6 +4241,9 @@ var PCOLS=[
 function profileEmptyMsg(n, what){ if(n>0) return false;
   var msg = PROFILE.logsOnly ? ("Not collected in this profile - "+what+" need a live_response / ir_triage collection. uac.log command line: "+trunc(PROFILE.cmd||"(unknown)",90))
                              : ("No "+what+" in this capture.");
+  // v0.15: on logs-only captures, point the empty Processes tab at the nearest substitute
+  if(PROFILE.logsOnly && SYSLOGSVC.length && String(what).indexOf("processes")>=0)
+    msg+=" Nearest substitute: Logs -> Service inventory ("+nf(SYSLOGSVC.length)+" programs seen writing to syslog).";
   $("tbl").innerHTML='<thead><tr><th>'+esc(what)+'</th></tr></thead><tbody><tr><td class="muted">'+esc(msg)+'</td></tr></tbody>';
   $("count").innerHTML="0 rows"; return true; }
 var PROC_TREE=false, PTREE_COLLAPSED={};
@@ -4282,14 +4371,19 @@ function renderLogon(){
   }
   populateLogonFilters();
   var fu=$("logfUser").value, fs=$("logfSrc").value, fr=$("logfResult").value;
+  var hideLL=true; try{ hideLL=$("logfHideLastlog").checked; }catch(ehl){}
+  var llHidden=0;
   var rows=[]; for(var i=0;i<LOGON.length;i++){ var r=LOGON[i];
     if(!passQ(r)) continue;
     if(fu && trimStr(r.user)!==fu) continue;
     if(fs && logonSrcType(r)!==fs) continue;
     if(fr && r.result!==fr) continue;
+    // v0.15: lastlog rows are per-account STATE (shown on Users) - hidden here by default
+    if(hideLL && r.result==="last-login" && !fr){ llHidden++; continue; }
     if((DFROM||DTO) && r.epoch){ if(!inDay(logonDay(r.epoch))) continue; }   // case window filters logons too
     rows.push(r); }
   sortRows(rows,LCOLS,SORT.logon); drawTable(LCOLS,rows,SORT.logon,"logon");
+  if(llHidden) $("count").innerHTML+=' · '+nf(llHidden)+' lastlog state rows hidden <span class="muted">(Users tab shows them; untick "hide lastlog rows" to mix them in)</span>';
   if(!LOGON.length){ $("tbl").innerHTML='<thead><tr><th>Logons</th></tr></thead><tbody><tr><td class="muted">No auth.log / wtmp / btmp / lastlog / last / lastb events in this capture. Empty on hosts with no interactive logins (e.g. WSL); on a server this view fills with SSH, sudo, pkexec, pam session and account-change events.</td></tr></tbody>'; $("count").innerHTML="0 rows"; }
   else if(CRON_SESSIONS>0){ $("count").innerHTML+=' · '+nf(CRON_SESSIONS)+' root-cron pam sessions hidden as noise'; }
 }
@@ -4349,18 +4443,7 @@ function sevCls(s){ return s>=3?"sc5":(s>=2?"sc3":(s>=1?"sc1":"sc0")); }
 function renderLogs(){
   $("logsHint").innerHTML=(PROFILE.logsOnly?"logs-only collection":"")+(JOURNALX.loaded?("  ·  "+esc(JOURNALX.note)):(resolveWsl()?"  ·  WSL detected - click to read journal contents":"  ·  WSL not found (journal content ingestion unavailable)"));
   var H=[];
-  // provisioning baseline (cloud-init)
-  if(CLOUDINIT){ var c=CLOUDINIT;
-    H.push('<div class="card"><h3>Cloud-init provisioning baseline</h3><div class="kvgrid">');
-    H.push(kvRow("First boot", c.firstBoot));
-    if(c.ds) H.push(kvRow("Datasource", c.ds));
-    if(c.ip) H.push(kvRow("Provisioned IP", c.ip+(c.mask?("  /  "+c.mask):"")));
-    if(c.mac) H.push(kvRow("MAC", c.mac));
-    if(c.hostname) H.push(kvRow("Hostname set", c.hostname));
-    H.push(kvRow("User-data scripts ran", c.userData?"YES - review /var/lib/cloud for the script":"no"));
-    H.push(kvRow("SSH keys injected at provision", c.keys?(nf(c.keys)+" event(s)"):"none seen"));
-    H.push('</div></div>');
-  }
+  // v0.15: the cloud-init provisioning baseline moved to the Overview tab (cloudInitHtml)
   // log integrity
   H.push('<div class="card"><h3>Log integrity</h3>');
   if(!INTEGRITY.length){ H.push('<div class="ok" style="font-size:12px">No integrity anomalies detected (utmp record alignment, log rotation chain, timestamp ordering, journal coverage, hostname consistency all clean).</div>'); }
@@ -5049,7 +5132,15 @@ function generateReport(){
     kv("Analyzed by", "UAC Triage Tool v"+APP_VERSION);
     kv("Report generated (UTC)", (function(){ var d=new Date(); return d.getUTCFullYear()+"-"+p2n(d.getUTCMonth()+1)+"-"+p2n(d.getUTCDate())+" "+p2n(d.getUTCHours())+":"+p2n(d.getUTCMinutes())+"Z"; })());
     kv("Case window", (CASE_FROM||CASE_TO)?((CASE_FROM||"…")+" to "+(CASE_TO||"…")):"");
+    // v0.15: identity + activity context
+    var aw2=activityWindow();
+    if(aw2) kv("Observable activity", fmtTime(aw2.from,false)+" to "+fmtTime(aw2.to,false)+" "+tzLabel());
+    for(var ni2=0;ni2<NETIDENT.length && ni2<6;ni2++){ kv("iface "+NETIDENT[ni2].iface, (NETIDENT[ni2].ips.join(", ")||"-")+(NETIDENT[ni2].mac?("  ·  "+NETIDENT[ni2].mac):"")); }
+    if(CLOUDINIT) kv("Cloud-init", (CLOUDINIT.ds?("datasource "+CLOUDINIT.ds+"; "):"")+"first boot "+(CLOUDINIT.firstBoot||"?")+(CLOUDINIT.userData?"; USER-DATA SCRIPTS RAN":"")+(CLOUDINIT.keys?("; "+CLOUDINIT.keys+" SSH-key injection event(s)"):""));
     ov.push('</table>');
+    var tk2=topTalkers();
+    if(tk2.length){ var ts2=[]; for(var t8=0;t8<tk2.length;t8++){ ts2.push(tk2[t8].ip+(geoTip(tk2[t8].ip)?(" ["+geoTip(tk2[t8].ip)+"]"):"")+" ("+nf(tk2[t8].n)+")"); }
+      ov.push('<p><b>Top external IPs:</b> '+esc(ts2.join(" · "))+'</p>'); }
     var fl=buildRunSummary();
     if(fl) ov.push('<p>'+nf(fl.entries)+' parsed entries; <b>'+nf(fl.flagged)+' flagged</b> (score ≥ 3 / IOC). Datasets: '
       +nf(PROC.length)+' processes, '+nf(NET.length)+' connections, '+nf(LOGON.length)+' logons, '+nf(USERS.length)+' accounts, '
@@ -5252,6 +5343,7 @@ function init(){
   $("evNotable").onclick=function(){ render(); };       // v0.14
   $("usersSel").onchange=function(){ render(); };       // v0.14
   $("usersSelClear").onclick=function(){ try{ var el=$("usersSel"); for(var i2=0;i2<el.options.length;i2++) el.options[i2].selected=false; }catch(e){} render(); };
+  $("logfHideLastlog").onclick=function(){ render(); };  // v0.15
   $("dfrom").onchange=function(){ DFROM=dayNum(this.value); if(LASTROOT){ reparseTimeline(); } };
   $("dto").onchange=function(){ DTO=dayNum(this.value); if(LASTROOT){ reparseTimeline(); } };
   $("clearBtn").onclick=function(){ $("q").value=""; QUERY=""; $("susOnly").checked=false; SUSONLY=false;
@@ -5363,6 +5455,7 @@ window.onload=function(){ init(); try{ window.setTimeout(checkSelfUpdate,600); }
       <li><b>Inventory tab</b> - a map of every key artifact (processes, network, logons, accounts, persistence, system, filesystem, logs, containers) showing present/absent, size, and an <b>open folder</b> link that opens the raw file in Explorer. The Persistence &amp; config inventory on Overview has the same open-folder links; click an artifact name there to view its contents inline.</li>
       <li><b>UI (v0.7):</b> the Processes table has a <b>Name</b> column and a <b>Tree view</b> toggle (collapsible parent/child hierarchy - click ▸/▾ to fold, a row for detail). <b>Logons</b> has User / Source / Result filters and a clickable link to each raw source log. <b>Events</b> has a min-score filter and a kind filter. Long tables keep their <b>header row frozen</b> while scrolling, and <b>Persistence &amp; system findings</b> shows a date/time column.</li>
       <li><b>Resizable columns</b> everywhere - drag the right edge of any column header (it highlights on hover); double-click the edge to reset. Widths persist per view.</li>
+      <li><b>Context release (v0.15):</b> the Overview now answers "which box is this and what can the capture speak to": a <b>network identity</b> block (interface IPs + MACs from <code>ip addr</code>/<code>ifconfig</code>), an <b>observable-activity window</b> (earliest→latest plausible timestamp across all datasets - what <code>/from /to</code> can usefully cover), <b>top external IPs</b> (most connections + logons + web requests, geo-tagged), an <b>analysis-performance</b> row (extract + parse durations, failed parser steps), and the <b>cloud-init provisioning baseline</b> (moved from Logs). Logons hides <b>lastlog state rows</b> by default (they're per-account state, shown on Users; a toolbar tick mixes them back in, hidden count disclosed). An empty Processes tab on a logs-only capture now points at Logs → Service inventory as the nearest substitute. The report gains identity / activity / top-talkers / cloud-init context.</li>
       <li><b>Refinement release (v0.14):</b> <b>Lateral movement</b> now lives on the Logons tab (above the logon table - it's the outbound half of the auth story; the Overview stat card jumps there), and the <b>Boots</b> table moved from Logs to the Overview. Tab order: Apps and Users sit left of Logons. <b>Web logs is renamed Apache logs</b> (still parses apache2/nginx/httpd combined format). Network gains a <b>Location column</b> (country + ASN, right of Remote) and a <b>location dropdown filter</b>; Events gains a <b>notable-events</b> filter (OOM / promisc / USB / modules / hosts pins / boots / journal anomalies); Users gains a <b>multiselect account filter</b>. <b>Generate report</b> now detects active UI filters and asks whether to write a <b>FILTERED report</b> (mirroring exactly what's on screen, clearly labelled, <code>_filtered</code> filename suffix) or the full one. Run metadata gains <b>Distribution</b> (/etc/os-release) and <b>Kernel</b> (uname). The processing-time pill moved next to the Instructions button.</li>
       <li><b>Layout &amp; reporting release (v0.13):</b> the tab bar is reorganised (Inventory sits beside Overview) and three sections graduated to their own tabs - <b>Persistence</b> (scored findings + config inventory), <b>Apps</b> (package installs + containers) and <b>Browser</b> (browser DBs + SQLECmd hand-off) - leaving the Overview focused on metadata, stats, top findings and lateral movement, with the <b>sar CPU summary</b> now pinned at its top (a cryptominer tell shouldn't hide on the Logs tab). <b>Generate report</b> (Overview button) writes a self-contained dark-theme HTML report with a navigation pane mirroring the tab names - score-sorted tables capped at the highest-signal rows, caps disclosed, safe to attach to a case. The Network tab gains a <b>public IPs only</b> filter, and <b>every table heading now carries a tooltip</b> explaining the column. Perf: the persistence deep-parse dropped from ~10 s to a fraction via a singleton FSO + fast reads for directory sweeps (found via the new v0.12 [perf] log).</li>
       <li><b>Progress &amp; perf-diagnostics release (v0.12):</b> a <b>processing-time pill</b> in the header ticks m:ss every half-second through extraction and parsing (the parser pipeline now yields to the UI between steps, so the clock genuinely moves - a frozen pill plus a never-changing step name in the status line means a real hang). The status line shows the <b>current step (k/38)</b> by name. Every step's duration is logged as <code>[perf]</code> lines (slow steps inline, full table at the end, incl. the slowest step and extraction time), external commands (bsdtar, robocopy, PowerShell, WSL journalctl) log their run time and exit code, and a failing parser is <b>skipped and logged</b> instead of aborting everything after it. The complete on-screen log (with all <code>[perf]</code> lines) is written to <code>parse_log_&lt;stamp&gt;.txt</code> beside the other outputs after each run - attach that file to any performance/bug report. <code>runinfo.json</code> gains <code>extractMs</code>, <code>parseMs</code> and the per-step timing array.</li>
