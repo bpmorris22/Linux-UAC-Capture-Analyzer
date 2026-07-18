@@ -73,7 +73,12 @@
   .btn{background:#1c2330;border:1px solid #30363d;color:#e6edf3;border-radius:6px;padding:6px 12px;font-size:13px;cursor:pointer;margin:2px}
   .btn:hover{border-color:#58a6ff}
   .btn.primary{background:#1f6feb;border-color:#1f6feb}
+  .btn.violet{background:#8957e5;border-color:#8957e5;color:#fff}
+  .btn.violet:hover{border-color:#a371f7}
   .btn.on{background:#1f6feb;border-color:#1f6feb;color:#fff}
+  /* v1.4: per-tab table heading (shared table card) */
+  .tblhead{margin:0 0 8px;font-size:13px;font-weight:600;color:#e6edf3}
+  .tblhead .d{font-size:11px;font-weight:400;color:#8b949e;text-transform:none;margin-left:8px}
   .row{white-space:nowrap}
   .stat{display:inline-block;background:#1c2330;border:1px solid #30363d;border-radius:8px;padding:6px 12px;margin:0 6px 6px 0;min-width:70px;vertical-align:top}
   .stat .n{font-size:17px;font-weight:700;display:block}
@@ -196,20 +201,20 @@
     <div class="card">
       <div class="row" id="tabbar" style="margin-bottom:2px">
         <button class="btn on" id="tabOverview" data-tab="overview" title="System overview: run metadata, dataset stats, top findings, sar CPU, network addresses, boot history, cloud-init">Overview</button>
-        <button class="btn" id="tabInv" data-tab="inv" title="Map of every key artifact: present/absent, size, open-folder links">Inventory</button>
+        <button class="btn" id="tabInv" data-tab="inv" title="Map of every key UAC artifact: present/absent, size, open-folder links">UAC Inventory</button>
         <button class="btn" id="tabProc" data-tab="proc" title="Running processes (ps + top + per-pid /proc + lsof), scored; flat table or collapsible tree">Processes</button>
         <button class="btn" id="tabNet" data-tab="net" title="Sockets from ss + /proc/net hex-decode cross-check, scored; geo/ASN, service types, VirusTotal links">Network</button>
         <button class="btn" id="tabApps" data-tab="apps" title="Recent package installs + containers (v0.13)">Apps</button>
         <button class="btn" id="tabUsers" data-tab="users" title="Per-account view: shell, groups, lock state, SSH keys, last login (v0.11)">Users</button>
-        <button class="btn" id="tabSsh" data-tab="ssh" title="SSH key inventory: authorized_keys (inbound access), per-user identity keys, and host keys - with options, comments and null-passphrase flags (v1.1)">SSH Keys</button>
+        <button class="btn" id="tabBrowser" data-tab="browser" title="Browser SQLite databases + the SQLECmd hand-off (v0.13)">Browser</button>
         <button class="btn" id="tabLogon" data-tab="logon" title="Authentication events (auth.log, wtmp/btmp, last/lastb) + lateral movement + by-source-IP aggregation">Logons</button>
+        <button class="btn" id="tabSsh" data-tab="ssh" title="SSH key inventory: authorized_keys (inbound access), per-user identity keys, and host keys - with options, comments and null-passphrase flags (v1.1)">SSH Keys</button>
         <button class="btn" id="tabPersist" data-tab="persist" title="Scored persistence command lines + the persistence/config file inventory (v0.13)">Persistence</button>
-        <button class="btn" id="tabTime" data-tab="time" title="Filesystem timeline from the bodyfile (mtime/atime/ctime/crtime), scored; the pivot ±15 min target">Timeline</button>
         <button class="btn" id="tabEvents" data-tab="events" title="One time-sorted axis merging logons, packages, boots, journal anomalies, web, audit and history events; click a timestamp to pivot the Timeline">Events</button>
+        <button class="btn" id="tabTime" data-tab="time" title="Filesystem timeline from the bodyfile (mtime/atime/ctime/crtime), scored; the pivot ±15 min target">Timeline</button>
         <button class="btn" id="tabWeb" data-tab="web" title="Web-server access logs (apache/nginx/httpd combined format) - initial-access hunting">Apache logs</button>
         <button class="btn" id="tabAudit" data-tab="audit" title="auditd execve + login records when audit.log is in the capture (v0.11)">Audit</button>
         <button class="btn" id="tabActions" data-tab="actions" title="Executed shell commands from per-user bash/zsh/sh history, timestamped where HISTTIMEFORMAT/zsh extended-history is set, scored (v1.2)">Actions</button>
-        <button class="btn" id="tabBrowser" data-tab="browser" title="Browser SQLite databases + the SQLECmd hand-off (v0.13)">Browser</button>
         <button class="btn" id="tabLogs" data-tab="logs" title="Log integrity, journal rotation analysis, syslog service inventory, notable events, WSL journal ingestion">Logs</button>
         <button class="btn" id="tabIoc" data-tab="ioc" title="Tree-wide IOC/keyword sweep hits + dormant SHA1 matches from hash_executables">IOC hits</button>
       </div>
@@ -221,24 +226,24 @@
         <label style="font-size:12px;margin-right:10px" title="Render times in the collector's host time zone instead of UTC (applies everywhere)."><input type="checkbox" id="tzOv"> host TZ</label>
         <button class="btn primary" id="reportBtn" title="Write a self-contained HTML report of everything parsed (all tabs, navigation pane, scored tables capped at the highest-signal rows) into the output folder and open it.">Generate report</button>
       </span>
-      <!-- v0.13: sar CPU summary surfaced here (was buried on the Logs tab) - a sustained-CPU
-           cryptominer tell should be visible the moment the capture opens -->
-      <div id="ovSar"></div>
-      <h3>System overview</h3>
+      <!-- v1.4: System overview first, then the sar / network / boots / cloud-init context blocks -->
+      <h3 title="Run metadata parsed from uac.log, the per-dataset counts, and the highest-scoring findings across every dataset - the at-a-glance triage summary.">System Overview</h3>
       <div class="cards3">
         <div class="col3">
           <!-- v0.17.1: "Run metadata" heading removed - redundant under "System overview" -->
           <div class="kvgrid" id="ovMeta"></div>
         </div>
         <div class="col3">
-          <h3>Datasets</h3>
+          <h3 title="How many rows each dataset holds, and how many are flagged (score ≥ 3). Click a card to jump to its tab where noted.">Datasets</h3>
           <div id="ovStats"></div>
         </div>
         <div class="col3">
-          <h3>Top findings</h3>
+          <h3 title="The highest-scoring rows across processes, network, logons, persistence, timeline and integrity - your starting point.">Top findings</h3>
           <div id="ovTop" class="kvgrid"></div>
         </div>
       </div>
+      <!-- v0.13: sar CPU summary (sustained-CPU cryptominer tell) -->
+      <div id="ovSar"></div>
       <!-- v0.16: network addresses sub-table (friendly adaptor labels; was kv rows in Run metadata) -->
       <div id="ovNetAddr"></div>
       <!-- v0.14: boots table surfaced here (was on the Logs tab) - boot cadence is capture context -->
@@ -314,10 +319,10 @@
           <option value="5">score &ge; 5</option>
         </select>
         <span class="mdwrap" data-udrop="1"><button class="btn" id="evKindBtn" data-udrop="1" onclick="mdToggleBtn('evKind')">kind: all ▾</button><div id="evKindPanel" class="hide mdpanel" data-udrop="1"></div></span>
-        <label style="font-size:12px" title="Show only the notable-event kinds (OOM kills, promiscuous mode, USB attach, module loads, /etc/hosts pins, cron/unit summaries, boots, journal rotation anomalies)."><input type="checkbox" id="evNotable"> notable events</label>
-        <label style="font-size:12px" title="Hide dual-use tooling package installs (nmap, tcpdump, ...) - context rows, not indicators."><input type="checkbox" id="evHideTool"> hide TOOLING</label>
+        <label style="font-size:12px" title="Show only the notable-event kinds (OOM kills, promiscuous mode, USB attach, module loads, /etc/hosts pins, cron/unit summaries, boots, journal rotation anomalies)."><input type="checkbox" id="evNotable"> Notable events only</label>
+        <label style="font-size:12px" title="Show only dual-use tooling package installs (nmap, tcpdump, socat, ...) - the fastest way to spot recently installed dual-use tools."><input type="checkbox" id="evToolOnly"> TOOLING only</label>
         <span class="sep"></span>
-        <label style="font-size:12px"><input type="checkbox" id="evTz"> host TZ</label>
+        <label style="font-size:12px"><input type="checkbox" id="evTz"> Show times in host TZ</label>
         <span class="sep"></span>
         <button class="btn" id="evExport">Export &rarr; CSV</button>
         <span class="muted" id="evCount" style="margin-left:8px"></span>
@@ -340,12 +345,13 @@
 
     <!-- TABLE (proc/net/logon/time/ioc) -->
     <div class="card hide" id="tblCard">
+      <div class="tblhead hide" id="tblHeading"></div>
       <div class="row" style="margin-bottom:8px">
         <input class="txt" id="q" placeholder="search this view (command, address, path, IOC…)" style="width:280px">
         <span id="procTreeWrap" class="hide"><span class="sep"></span>
           <button class="btn" id="procTreeBtn" title="Toggle between the flat process table and a collapsible parent/child tree.">Tree view</button></span>
         <span id="netFilters" class="hide"><span class="sep"></span>
-          <label style="font-size:12px" title="Show only rows whose REMOTE address is a public (non-RFC1918/loopback/link-local) IP - the outbound/inbound internet traffic."><input type="checkbox" id="netPubOnly"> public IPs only</label>
+          <label style="font-size:12px" title="Show only rows whose REMOTE address is a public (non-RFC1918/loopback/link-local) IP - the outbound/inbound internet traffic."><input type="checkbox" id="netPubOnly"> Public IPs only</label>
           <span class="mdwrap" data-udrop="1"><button class="btn" id="netLocBtn" data-udrop="1" onclick="mdToggleBtn('netLoc')">location: all ▾</button><div id="netLocPanel" class="hide mdpanel" data-udrop="1"></div></span>
           <span class="mdwrap" data-udrop="1"><button class="btn" id="netTypeBtn" data-udrop="1" onclick="mdToggleBtn('netType')">type: all ▾</button><div id="netTypePanel" class="hide mdpanel" data-udrop="1"></div></span></span>
         <span id="procSusWrap" class="hide"><span class="sep"></span>
@@ -358,28 +364,28 @@
             <div id="usersDropPanel" class="hide" data-udrop="1" style="position:absolute;top:105%;left:0;z-index:80;background:#161b22;border:1px solid #30363d;border-radius:6px;padding:6px 10px;max-height:220px;overflow:auto;min-width:170px;text-align:left"></div>
           </span>
           <span class="lnk" id="usersSelClear" style="font-size:11px" title="Clear the account selection">clear</span>
-          <label style="font-size:12px" title="Show only accounts that can actually be logged into: interactive shell AND (password usable OR SSH keys present). '?' rows (shadow not collected) are treated as enabled if they have keys."><input type="checkbox" id="usersEnabledOnly"> enabled only</label>
+          <label style="font-size:12px" title="Show only accounts that can actually be logged into: interactive shell AND (password usable OR SSH keys present). '?' rows (shadow not collected) are treated as enabled if they have keys."><input type="checkbox" id="usersEnabledOnly"> Enabled only</label>
           <button class="btn" id="usersByGrpBtn" title="Switch to the group view: every group with its GID and member accounts (primary + supplementary). Click a group for the full member list. (v0.17)">By group</button></span>
         <span id="logonFilters" class="hide"><span class="sep"></span>
           <span class="mdwrap" data-udrop="1"><button class="btn" id="logfUserBtn" data-udrop="1" onclick="mdToggleBtn('logfUser')">user: all ▾</button><div id="logfUserPanel" class="hide mdpanel" data-udrop="1"></div></span>
           <span class="mdwrap" data-udrop="1"><button class="btn" id="logfSrcBtn" data-udrop="1" onclick="mdToggleBtn('logfSrc')">source: all ▾</button><div id="logfSrcPanel" class="hide mdpanel" data-udrop="1"></div></span>
           <span class="mdwrap" data-udrop="1"><button class="btn" id="logfResultBtn" data-udrop="1" onclick="mdToggleBtn('logfResult')">result: all ▾</button><div id="logfResultPanel" class="hide mdpanel" data-udrop="1"></div></span>
           <button class="btn" id="logonByIpBtn" title="Aggregate logons per source IP: first/last seen, failure + success counts, users tried, geo/ASN. The fastest brute-force triage view. (v0.11)">By source IP</button>
-          <label style="font-size:12px" title="lastlog rows are per-account STATE (one row per account's most recent login), not events - they now live on the Users tab. Untick to mix them back into this event list."><input type="checkbox" id="logfHideLastlog" checked> hide lastlog rows</label></span>
+          <label style="font-size:12px" title="lastlog rows are per-account STATE (one row per account's most recent login), not events - they now live on the Users tab. Untick to mix them back into this event list."><input type="checkbox" id="logfHideLastlog" checked> Hide lastlog rows</label></span>
         <span id="bruteWrap" class="hide"><span class="sep"></span>
-          <label style="font-size:12px" title="Show only brute-force activity: on Logons, failures and the eventual success from any source IP with 5+ failed attempts (SPRAY / BRUTEWIN); on Audit, failed USER_AUTH/USER_LOGIN records from a source with 5+ failures."><input type="checkbox" id="bruteOnly"> brute-force only</label></span>
+          <label style="font-size:12px" title="Show only brute-force activity: on Logons, failures and the eventual success from any source IP with 5+ failed attempts (SPRAY / BRUTEWIN); on Audit, failed USER_AUTH/USER_LOGIN records from a source with 5+ failures."><input type="checkbox" id="bruteOnly"> Brute-force only</label></span>
         <span id="dateWrap" class="hide"><span class="sep"></span>
           <input class="txt mono" id="dfrom" placeholder="from YYYY-MM-DD" style="width:140px" title="Filter timeline by mtime/ctime/crtime (UTC)">
           <span class="muted">&rarr;</span>
           <input class="txt mono" id="dto" placeholder="to YYYY-MM-DD" style="width:140px" title="Filter timeline by mtime/ctime/crtime (UTC)"></span>
         <span class="sep"></span>
-        <label style="font-size:12px" title="Show only rows scored suspicious (score ≥ 3)."><input type="checkbox" id="susOnly"> flagged only</label>
+        <label style="font-size:12px" title="Show only rows scored suspicious (score ≥ 3)."><input type="checkbox" id="susOnly"> Flagged only</label>
         <span id="tzWrap" class="hide"><span class="sep"></span>
-          <label style="font-size:12px" title="Render epoch times in the collector's local time zone (from uac.log) instead of UTC."><input type="checkbox" id="tzMain"> host TZ</label></span>
+          <label style="font-size:12px" title="Render epoch times in the collector's local time zone (from uac.log) instead of UTC."><input type="checkbox" id="tzMain"> Show times in host TZ</label></span>
         <span class="sep"></span>
-        <button class="btn" id="clearBtn">clear</button>
-        <button class="btn" id="exportBtn">Export view &rarr; CSV</button>
-        <button class="btn" id="copyBtn" title="Copy the current filtered view (up to 500 rows) to the clipboard as compact pipe-delimited text lines - ready to paste into case notes.">Copy to Clipboard</button>
+        <button class="btn" id="clearBtn">Clear</button>
+        <button class="btn violet" id="exportBtn">Export View &rarr; CSV</button>
+        <button class="btn violet" id="copyBtn" title="Copy the current filtered view (up to 500 rows) to the clipboard as compact pipe-delimited text lines - ready to paste into case notes.">Copy to Clipboard</button>
         <span class="muted" id="count" style="margin-left:8px"></span>
       </div>
       <!-- v0.14: lateral movement lives with the Logons tab (outbound half of the auth story) -->
@@ -402,7 +408,7 @@
 <script language="JScript">
 "use strict";
 
-var APP_VERSION = "1.3.1";
+var APP_VERSION = "1.4.0";
 /* v0.9.4 - SQLECmd wrapper: offer to DOWNLOAD instead of hunt for it (operator request):
    - if the wrapper isn't found anywhere, a hand-off now offers to download the latest
      SQLECmd-Wrapper.hta from GitHub into THIS app's folder (browse stays as the offline
@@ -3962,7 +3968,7 @@ function renderWeb(){
     rows.push(r); }
   sortRows(rows,WCOLS,SORT.web); drawTable(WCOLS,rows,SORT.web,"web");
   if(!WEBLOG.length){
-    $("tbl").innerHTML='<thead><tr><th>Web-server access logs</th></tr></thead><tbody><tr><td class="muted">No apache2/nginx/httpd access logs in this capture (looked under [root]/var/log/{apache2,nginx,httpd}). Normal on hosts that are not web servers'+(PROFILE.logsOnly?"":"; also absent when the collection profile skipped /var/log subdirectories")+'.</td></tr></tbody>';
+    $("tbl").innerHTML='<thead><tr><th>Web-Server Access Logs</th></tr></thead><tbody><tr><td class="muted">No apache2/nginx/httpd access logs in this capture (looked under [root]/var/log/{apache2,nginx,httpd}). Normal on hosts that are not web servers'+(PROFILE.logsOnly?"":"; also absent when the collection profile skipped /var/log subdirectories")+'.</td></tr></tbody>';
     $("count").innerHTML="0 rows"; return; }
   if(WEBCAP.total>WEBCAP.shown) $("count").innerHTML+=' · <span class="tag sus">capped: '+nf(WEBCAP.shown)+' of '+nf(WEBCAP.total)+' stored</span> narrow /from /to';
 }
@@ -4040,7 +4046,7 @@ function renderAudit(){
     rows.push(r); }
   sortRows(rows,ACOLS,SORT.audit); drawTable(ACOLS,rows,SORT.audit,"audit");
   if(!AUDITX.length){
-    $("tbl").innerHTML='<thead><tr><th>auditd records</th></tr></thead><tbody><tr><td class="muted">No auditd logs in this capture ([root]/var/log/audit/audit.log). Only hosts running auditd produce these - when present this is the closest Linux gets to process-creation telemetry (execve + login records).</td></tr></tbody>';
+    $("tbl").innerHTML='<thead><tr><th>Audited Records</th></tr></thead><tbody><tr><td class="muted">No auditd logs in this capture ([root]/var/log/audit/audit.log). Only hosts running auditd produce these - when present this is the closest Linux gets to process-creation telemetry (execve + login records).</td></tr></tbody>';
     $("count").innerHTML="0 rows"; return; }
   if(brute) $("count").innerHTML+=' · <span class="tag sus">brute-force only</span> (failed auth from a source with '+BRUTE_THRESH+'+ failures)';
   if(AUDITCAP.total>AUDITCAP.shown) $("count").innerHTML+=' · <span class="tag sus">capped: '+nf(AUDITCAP.shown)+' of '+nf(AUDITCAP.total)+' stored</span>';
@@ -4102,7 +4108,7 @@ function renderActions(){
     rows.push(r); }
   sortRows(rows,NCMDCOLS,SORT.actions); drawTable(NCMDCOLS,rows,SORT.actions,"actions");
   if(!ACTIONS.length){
-    $("tbl").innerHTML='<thead><tr><th>Actions</th></tr></thead><tbody><tr><td class="muted">No shell command history in this capture - looked for per-user ~/.bash_history, ~/.zsh_history, ~/.sh_history, ~/.ash_history. A logs-only collection, a freshly-provisioned host, or accounts with HISTFILE disabled produce none. Anti-forensics (history -c / unset HISTFILE) also empties them - check the Persistence tab for that tell.</td></tr></tbody>';
+    $("tbl").innerHTML='<thead><tr><th>Executed Bash Commands</th></tr></thead><tbody><tr><td class="muted">No shell command history in this capture - looked for per-user ~/.bash_history, ~/.zsh_history, ~/.sh_history, ~/.ash_history. A logs-only collection, a freshly-provisioned host, or accounts with HISTFILE disabled produce none. Anti-forensics (history -c / unset HISTFILE) also empties them - check the Persistence tab for that tell.</td></tr></tbody>';
     $("count").innerHTML="0 rows"; return; }
   var withTs=0; for(i=0;i<ACTIONS.length;i++){ if(ACTIONS[i].epoch) withTs++; }
   $("count").innerHTML+=" · "+nf(withTs)+" timestamped"+(withTs===0?" (shells recorded no HISTTIMEFORMAT - order preserved, absolute times unknown)":"")
@@ -4177,8 +4183,30 @@ function setTab(t, quiet){
   showEl("netFilters", t==="net");
   showEl("usersFilters", t==="users");                       // v0.14
   showEl("latWrap", t==="logon" && LATERAL.length>0);        // v0.14: lateral movement lives on Logons
+  setTblHeading(t);                                          // v1.4: per-tab heading + description
   if(!isOv && !isLogs && !isEv && !isPersist && !isApps && !isBrowser){ $("q").value=QUERY; }
   if(!quiet) render();
+}
+/* v1.4: heading + one-line description shown above every table-card tab */
+var TBL_HEADINGS={
+  inv:["UAC inventory","Every key artifact UAC could collect, shown present or absent with size and an open-folder link to the raw file - the coverage map for this capture."],
+  proc:["Processes","Running processes from ps, enriched with top / per-pid /proc / lsof and scored - hidden-from-ps, deleted-binary, LD_PRELOAD, memfd, web-shell and masquerade tells. Toggle the tree view for parent/child hierarchy."],
+  net:["Network connections","Sockets from ss cross-checked against /proc/net (hidden-listener detection), scored, with service type, resolved country/ASN and click-to-VirusTotal on public remotes."],
+  users:["User accounts","Every account from /etc/passwd with shell, groups, shadow lock state, SSH-key and shell-history counts, last login and an enabled verdict. Toggle By group for group membership."],
+  logon:["Logon events","Authentication events from auth.log, wtmp/btmp and last/lastb - SSH accepted/failed, sudo, pkexec, PAM sessions, account changes. Lateral-movement evidence sits above; By source IP aggregates for brute-force triage."],
+  ssh:["SSH keys","Every SSH key in the capture: authorized_keys (who can log IN), per-user identity keys (public/private, passphrase state) and host keys - with source restrictions, forced commands and null-passphrase flags."],
+  time:["Filesystem timeline","MAC-times for every file from the TSK bodyfile (modify / access / change / create), scored for temp-path executables, hidden paths and setuid bits. The pivot ±15 min target; narrow with the case window on a large capture."],
+  web:["Web-server access logs","apache2 / nginx / httpd access logs (combined format), scored for initial-access hunting: POSTs to script URIs, traversal and encoded payloads, and tool user-agents."],
+  audit:["Audited records","auditd execve records (with hex-decoded arguments and auid attribution) and USER_AUTH / USER_LOGIN events - the closest Linux gets to process-creation telemetry, present only when the host ran auditd."],
+  actions:["Executed bash commands","The full executed-command record from each user's bash/zsh/sh history - timestamped where the shell recorded times - scored for temp-path exec, decoder/pipe-to-shell one-liners, URL fetches, anti-forensics and elevation."],
+  ioc:["IOC hits","Every line in the capture tree that matched an operator-supplied IOC/keyword term, plus SHA1 matches against on-disk executables (dormant implants). Empty until you load IOC terms."]
+};
+function setTblHeading(t){
+  var el=$("tblHeading"); if(!el) return;
+  var h=TBL_HEADINGS[t];
+  if(!h){ showEl("tblHeading", false); el.innerHTML=""; return; }
+  el.innerHTML=esc(h[0])+'<span class="d">'+esc(h[1])+'</span>';
+  showEl("tblHeading", true);
 }
 function render(){
   if(TAB==="overview"){ renderOverview(); return; }
@@ -4313,7 +4341,7 @@ function renderOverview(){
 function cloudInitHtml(){
   if(!CLOUDINIT) return "";
   var c=CLOUDINIT, H=[];
-  H.push('<h3 style="margin-top:14px">Cloud-init provisioning baseline</h3><div class="kvgrid">');
+  H.push('<h3 style="margin-top:14px" title="What the cloud/hypervisor handed this VM at first boot - the provisioning baseline to compare the running host against.">Cloud-init provisioning baseline <span class="muted" style="font-weight:400;text-transform:none">- how this VM was originally provisioned: first boot, datasource, original IP/MAC, and whether user-data scripts ran or SSH keys were injected</span></h3><div class="kvgrid">');
   H.push(kvRow("First boot", c.firstBoot));
   if(c.ds) H.push(kvRow("Datasource", c.ds));
   if(c.ip) H.push(kvRow("Provisioned IP", c.ip+(c.mask?("  /  "+c.mask):"")));
@@ -4344,10 +4372,13 @@ function bootsHtml(){
 function sarSummaryHtml(){
   if(!SARSUM) return "";
   var S=SARSUM, H=[];
-  H.push('<div style="margin-bottom:10px"><h3>sysstat / sar CPU summary</h3>');
-  H.push('<div>'+statCard(nf(S.days),"sar day-files","")+statCard(nf(S.intervals),"intervals","")
-    +statCard(S.maxUsr.toFixed(0)+"%","peak %usr", S.maxUsr>=80?"warn":"")
-    +statCard(nf(S.busy.length),">=80% usr", S.busy.length?"warn":"")+'</div>');
+  H.push('<div style="margin-bottom:10px"><h3 title="From sysstat/sar day-files - historical CPU usage. Sustained high user-CPU with no known workload is a classic cryptominer tell.">sysstat / sar CPU summary <span class="muted" style="font-weight:400;text-transform:none">- historical CPU from sar; sustained high %usr can indicate a cryptominer</span></h3>');
+  H.push('<div>'
+    +'<span title="Number of daily sar files (saNN) found - each is one day of recorded CPU statistics.">'+statCard(nf(S.days),"sar day-files","")+'</span>'
+    +'<span title="Total sampling intervals across all day-files (typically one every 10 minutes).">'+statCard(nf(S.intervals),"intervals","")+'</span>'
+    +'<span title="Highest single-interval user-space CPU % seen. 80%+ with no expected workload warrants a look at Processes.">'+statCard(S.maxUsr.toFixed(0)+"%","peak %usr", S.maxUsr>=80?"warn":"")+'</span>'
+    +'<span title="How many intervals ran at 80%+ user CPU - sustained hits (not one spike) are the cryptominer pattern.">'+statCard(nf(S.busy.length),">=80% usr", S.busy.length?"warn":"")+'</span>'
+    +'</div>');
   if(S.busy.length){ H.push('<div class="scroll" style="max-height:14vh"><table><thead><tr>'
     +'<th title="sar day-file date">Date</th><th title="Interval start time (host local)">Time</th>'
     +'<th title="% CPU in user space - sustained high values with no known workload = cryptominer tell">%usr</th>'
@@ -4914,7 +4945,7 @@ function renderLogs(){
   var H=[];
   // v0.15: the cloud-init provisioning baseline moved to the Overview tab (cloudInitHtml)
   // log integrity
-  H.push('<div class="card"><h3>Log integrity</h3>');
+  H.push('<div class="card"><h3 title="Tamper and coverage checks across the logs: utmp record alignment, broken rotation chains, out-of-order timestamps, zero-byte critical logs, journal rotation anomalies and hostname consistency.">Log integrity <span class="muted" style="font-weight:400;text-transform:none">- tamper / rotation / alignment / coverage checks</span></h3>');
   if(!INTEGRITY.length){ H.push('<div class="ok" style="font-size:12px">No integrity anomalies detected (utmp record alignment, log rotation chain, timestamp ordering, journal coverage, hostname consistency all clean).</div>'); }
   else { H.push('<div class="scroll" style="max-height:26vh"><table><thead><tr><th>Sev</th><th>Check</th><th>Detail</th></tr></thead><tbody>');
     for(var i=0;i<INTEGRITY.length;i++){ var it=INTEGRITY[i];
@@ -4947,7 +4978,7 @@ function renderLogs(){
     H.push('</tbody></table></div>'); }
   H.push('</div></div>');
   // notable events
-  H.push('<div class="col3" style="width:49%"><div class="card"><h3>Notable log events</h3>');
+  H.push('<div class="col3" style="width:49%"><div class="card"><h3 title="High-signal one-off events pulled from syslog / kern.log: OOM kills, promiscuous-mode (sniffer) interfaces, USB attaches, kernel module / taint events, cron execution and new-unit summaries.">Notable log events <span class="muted" style="font-weight:400;text-transform:none">- OOM / promisc / USB / modules / cron / units</span></h3>');
   if(!LOGEVENTS.length){ H.push('<div class="muted" style="font-size:12px">No notable events (OOM kills, promiscuous mode, USB/module loads, cron/unit summaries).</div>'); }
   else { H.push('<div class="scroll" style="max-height:30vh"><table><thead><tr><th>Kind</th><th>Detail</th></tr></thead><tbody>');
     var ev=LOGEVENTS.slice(0); ev.sort(function(a,b){ return (b.sev||0)-(a.sev||0); });
@@ -4970,13 +5001,13 @@ function populateEvKind(){ var ks={}, i; for(i=0;i<EVENTS.length;i++){ ks[EVENTS
 function renderEvents(){
   populateEvKind();
   var minSc=parseInt($("evMinScore").value,10)||0;
-  var hideTool=false, notable=false; try{ hideTool=$("evHideTool").checked; notable=$("evNotable").checked; }catch(eht){}
+  var toolOnly=false, notable=false; try{ toolOnly=$("evToolOnly").checked; notable=$("evNotable").checked; }catch(eht){}
   var rows=[], i;
   for(i=0;i<EVENTS.length;i++){ var e=EVENTS[i];
     if(e.score<minSc) continue;
     if(!mdPass("evKind", e.kind)) continue;   // v0.17 multiselect
     if(notable && !NOTABLE_KINDS[e.kind]) continue; // v0.14: notable-events filter
-    if(hideTool && hasTag(e,"TOOLING")) continue;   // v0.11: dual-use installs are context, hideable
+    if(toolOnly && !hasTag(e,"TOOLING")) continue;  // v1.4: TOOLING only - spot recently installed dual-use tools
     if(EVQ && e.blob.indexOf(EVQ)<0) continue;
     if(EVFROM||EVTO){ var d=eventDay(e.epoch); if(EVFROM && d<EVFROM) continue; if(EVTO && d>EVTO) continue; }
     rows.push(e);
@@ -5591,7 +5622,7 @@ function activeFilterDesc(){
   if(usersSelSet()) f.push("selected accounts only (Users tab)");
   try{ if((parseInt($("evMinScore").value,10)||0)>0) f.push("events score >= "+$("evMinScore").value);
     if($("evNotable").checked) f.push("notable events only");
-    if($("evHideTool").checked) f.push("TOOLING hidden"); }catch(e3){}
+    if($("evToolOnly").checked) f.push("TOOLING only"); }catch(e3){}
   if(mdSet("evKind")) f.push("events kind in ["+mdDesc("evKind")+"]");
   if(mdSet("actUser")) f.push("actions user in ["+mdDesc("actUser")+"]");
   try{ if($("bruteOnly").checked) f.push("brute-force only (Logons/Audit)"); }catch(ebd){}
@@ -5634,7 +5665,7 @@ function generateReport(){
       if(PIVOT){ b1=[]; for(i7=0;i7<_T.length;i7++){ r7=_T[i7];
         if((r7.mtime>=PIVOT.from&&r7.mtime<=PIVOT.to)||(r7.ctime>=PIVOT.from&&r7.ctime<=PIVOT.to)
          ||(r7.crtime>=PIVOT.from&&r7.crtime<=PIVOT.to)||(r7.atime>=PIVOT.from&&r7.atime<=PIVOT.to)) b1.push(r7); } _T=b1; }
-      var mS=0,noT=false,hiT=false; try{ mS=parseInt($("evMinScore").value,10)||0; noT=$("evNotable").checked; hiT=$("evHideTool").checked; }catch(ee2){}
+      var mS=0,noT=false,toO=false; try{ mS=parseInt($("evMinScore").value,10)||0; noT=$("evNotable").checked; toO=$("evToolOnly").checked; }catch(ee2){}
       b1=[]; for(i7=0;i7<EVENTS.length;i7++){ var e7=EVENTS[i7];
         if(e7.score<mS) continue;
         if(!mdPass("evKind", e7.kind)) continue;
@@ -5794,7 +5825,11 @@ function generateReport(){
       +'<p class="muted">Times are '+esc(tzLabel())+' unless a column says otherwise. Scores: 3-4 amber (suspicious), 5+ red (high). '
       +'Heuristic output for triage - verify findings against the raw artifacts before reporting them as fact.</p>'
       +S.join("")+'</main></body></html>';
-    var path=String(LASTOUTDIR).replace(/[\\\/]+$/,"")+"\\report_"+sanitHost(host)+(useFilters?"_filtered":"")+"_"+nowStamp()+".html";
+    // v1.4 filename convention: "<Hostname> - <Full|Filtered> UAC Report - <YYYYMMDD-HHMMSS UTC>"
+    var rd=new Date(); function rz(x){ return (x<10?"0":"")+x; }
+    var rutc=rd.getUTCFullYear()+""+rz(rd.getUTCMonth()+1)+rz(rd.getUTCDate())+"-"+rz(rd.getUTCHours())+rz(rd.getUTCMinutes())+rz(rd.getUTCSeconds());
+    var rlabel=(useFilters?"Filtered":"Full")+" UAC Report";
+    var path=String(LASTOUTDIR).replace(/[\\\/]+$/,"")+"\\"+sanitHost(host)+" - "+rlabel+" - "+rutc+".html";
     writeUtf8(path, html);
     appendLog("Report written: "+path);
     setStatus("Report generated → "+path,"ok");
@@ -5867,7 +5902,7 @@ function init(){
   mdReg("logfSrc","source"); mdReg("logfResult","result"); mdReg("procSus","suspicion"); mdReg("evKind","kind"); mdReg("actUser","user");
   $("evTz").onclick=function(){ setTz(this.checked); };
   $("evExport").onclick=exportEvents;
-  $("evHideTool").onclick=function(){ render(); };
+  $("evToolOnly").onclick=function(){ render(); };
   // v0.11: Logons by-source-IP aggregate view
   $("logonByIpBtn").onclick=function(){ LOGON_BYIP=!LOGON_BYIP; this.className=LOGON_BYIP?"btn on":"btn"; render(); };
   // v0.11: online geo/ASN enrichment - offline.txt overrules the checkbox entirely
@@ -6017,6 +6052,7 @@ window.onload=function(){ init(); try{ window.setTimeout(checkSelfUpdate,600); }
       <li><b>Inventory tab</b> - a map of every key artifact (processes, network, logons, accounts, persistence, system, filesystem, logs, containers) showing present/absent, size, and an <b>open folder</b> link that opens the raw file in Explorer. The Persistence &amp; config inventory on Overview has the same open-folder links; click an artifact name there to view its contents inline.</li>
       <li><b>UI (v0.7):</b> the Processes table has a <b>Name</b> column and a <b>Tree view</b> toggle (collapsible parent/child hierarchy - click ▸/▾ to fold, a row for detail). <b>Logons</b> has User / Source / Result filters and a clickable link to each raw source log. <b>Events</b> has a min-score filter and a kind filter. Long tables keep their <b>header row frozen</b> while scrolling, and <b>Persistence &amp; system findings</b> shows a date/time column.</li>
       <li><b>Resizable columns</b> everywhere - drag the right edge of any column header (it highlights on hover); double-click the edge to reset. Widths persist per view.</li>
+      <li><b>Presentation pass (v1.4):</b> every table tab now shows a <b>heading and one-line description</b> above the grid; report files follow the convention <code>&lt;Hostname&gt; - Full|Filtered UAC Report - YYYYMMDD-HHMMSS</code> (UTC); the tab bar is reordered (Browser by Users, SSH Keys by Logons, Events before Timeline) and <b>Inventory</b> is now <b>UAC Inventory</b>; <b>System Overview</b> sits at the top of the Overview with sar/boots/cloud-init below it; the sar cards and the cloud-init section gained tooltips/descriptions; the Events <b>hide TOOLING</b> toggle became <b>TOOLING only</b> (spot recently installed dual-use tools directly); <b>Export View → CSV</b> and <b>Copy to Clipboard</b> are violet; and toolbar/heading capitalization was tidied up.</li>
       <li><b>Brute-force filter (v1.3):</b> a <b>brute-force only</b> checkbox on <b>Logons</b> and <b>Audit</b>. On Logons it shows the failures and the eventual success from any source IP with 5+ failed attempts (the SPRAY / BRUTEWIN picture), and on the <b>By source IP</b> view it narrows to just those brute sources. On Audit it shows failed <code>USER_AUTH</code>/<code>USER_LOGIN</code> records from a source that failed 5+ times. One click isolates a password-guessing campaign and the account/IP that eventually got in.</li>
       <li><b>Actions tab (v1.2):</b> the complete <b>executed-command history</b> - every line from each user's bash/zsh/sh history (not just the hostile ones the Persistence tab keeps), <b>timestamped</b> where the shell recorded times (bash <code>HISTTIMEFORMAT</code> "#epoch" lines, zsh extended-history), and scored with the command heuristics (IOC, temp-path exec, decoder/interactive shell, pipe-to-shell, URL fetch, anti-forensics, elevation). Per-user multiselect filter, case-window and host-TZ aware, click a timestamped row to <b>pivot the Timeline ±15 min</b>. Answers "what did they actually type on this box." Exports to CSV and appears in the report.</li>
       <li><b>SSH Keys tab (v1.1):</b> a dedicated inventory of the key material in the capture - <b>authorized_keys</b> entries (who can log IN, with source-restriction and forced-command flags), per-user <b>identity keys</b> (id_* private/public, with passphrase state), and <b>host keys</b> from /etc/ssh. A short key-id (base64 head…tail) lets you match the same key across accounts by eye; a <b>null-passphrase private key</b> is flagged (usable as-is if exfiltrated), as is an <b>unrestricted</b> or <b>forced-command</b> authorized_keys entry. Exports to CSV and appears in the report.</li>
