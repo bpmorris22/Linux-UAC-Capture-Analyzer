@@ -62,6 +62,8 @@
   .pill.info{border-color:#1f6feb;color:#58a6ff}
   .pill.clk{cursor:pointer}
   .pill.clk:hover{border-color:#58a6ff}
+  .mdwrap{position:relative;display:inline-block}
+  .mdpanel{position:absolute;top:105%;left:0;z-index:80;background:#161b22;border:1px solid #30363d;border-radius:6px;padding:6px 10px;max-height:230px;overflow:auto;min-width:150px;text-align:left;box-shadow:0 6px 18px rgba(0,0,0,.5)}
   .wrap{padding:12px 14px}
   .card{background:#161b22;border:1px solid #30363d;border-radius:8px;padding:12px;margin-bottom:12px}
   .card h3{margin:0 0 8px;font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:#8b949e}
@@ -193,21 +195,21 @@
   <div id="results" class="hide">
     <div class="card">
       <div class="row" id="tabbar" style="margin-bottom:2px">
-        <button class="btn on" id="tabOverview" data-tab="overview">Overview</button>
+        <button class="btn on" id="tabOverview" data-tab="overview" title="System overview: run metadata, dataset stats, top findings, sar CPU, network addresses, boot history, cloud-init">Overview</button>
         <button class="btn" id="tabInv" data-tab="inv" title="Map of every key artifact: present/absent, size, open-folder links">Inventory</button>
-        <button class="btn" id="tabProc" data-tab="proc">Processes</button>
-        <button class="btn" id="tabNet" data-tab="net">Network</button>
+        <button class="btn" id="tabProc" data-tab="proc" title="Running processes (ps + top + per-pid /proc + lsof), scored; flat table or collapsible tree">Processes</button>
+        <button class="btn" id="tabNet" data-tab="net" title="Sockets from ss + /proc/net hex-decode cross-check, scored; geo/ASN, service types, VirusTotal links">Network</button>
         <button class="btn" id="tabApps" data-tab="apps" title="Recent package installs + containers (v0.13)">Apps</button>
         <button class="btn" id="tabUsers" data-tab="users" title="Per-account view: shell, groups, lock state, SSH keys, last login (v0.11)">Users</button>
-        <button class="btn" id="tabLogon" data-tab="logon">Logons</button>
+        <button class="btn" id="tabLogon" data-tab="logon" title="Authentication events (auth.log, wtmp/btmp, last/lastb) + lateral movement + by-source-IP aggregation">Logons</button>
         <button class="btn" id="tabPersist" data-tab="persist" title="Scored persistence command lines + the persistence/config file inventory (v0.13)">Persistence</button>
-        <button class="btn" id="tabTime" data-tab="time">Timeline</button>
-        <button class="btn" id="tabEvents" data-tab="events">Events</button>
+        <button class="btn" id="tabTime" data-tab="time" title="Filesystem timeline from the bodyfile (mtime/atime/ctime/crtime), scored; the pivot ±15 min target">Timeline</button>
+        <button class="btn" id="tabEvents" data-tab="events" title="One time-sorted axis merging logons, packages, boots, journal anomalies, web, audit and history events; click a timestamp to pivot the Timeline">Events</button>
         <button class="btn" id="tabWeb" data-tab="web" title="Web-server access logs (apache/nginx/httpd combined format) - initial-access hunting">Apache logs</button>
         <button class="btn" id="tabAudit" data-tab="audit" title="auditd execve + login records when audit.log is in the capture (v0.11)">Audit</button>
         <button class="btn" id="tabBrowser" data-tab="browser" title="Browser SQLite databases + the SQLECmd hand-off (v0.13)">Browser</button>
-        <button class="btn" id="tabLogs" data-tab="logs">Logs</button>
-        <button class="btn" id="tabIoc" data-tab="ioc">IOC hits</button>
+        <button class="btn" id="tabLogs" data-tab="logs" title="Log integrity, journal rotation analysis, syslog service inventory, notable events, WSL journal ingestion">Logs</button>
+        <button class="btn" id="tabIoc" data-tab="ioc" title="Tree-wide IOC/keyword sweep hits + dormant SHA1 matches from hash_executables">IOC hits</button>
       </div>
     </div>
 
@@ -273,6 +275,7 @@
         <div class="scroll" style="max-height:30vh"><table id="ctrTbl"></table></div>
       </div>
       <div id="pkgWrap" style="margin-top:14px">
+        <label style="font-size:12px;float:right" title="Show only dual-use tooling watchlist installs (nmap, socat, xmrig, ...) and IOC-matching packages."><input type="checkbox" id="pkgSusOnly"> suspicious only</label>
         <h3>Recent package installs <span class="muted" style="font-weight:400;text-transform:none" id="pkgWinLbl"></span></h3>
         <div class="scroll" style="max-height:38vh"><table id="pkgTbl"></table></div>
       </div>
@@ -308,7 +311,7 @@
           <option value="3">score &ge; 3</option>
           <option value="5">score &ge; 5</option>
         </select>
-        <select id="evKind" title="Filter by event kind"><option value="">kind: all</option></select>
+        <span class="mdwrap" data-udrop="1"><button class="btn" id="evKindBtn" data-udrop="1" onclick="mdToggleBtn('evKind')">kind: all ▾</button><div id="evKindPanel" class="hide mdpanel" data-udrop="1"></div></span>
         <label style="font-size:12px" title="Show only the notable-event kinds (OOM kills, promiscuous mode, USB attach, module loads, /etc/hosts pins, cron/unit summaries, boots, journal rotation anomalies)."><input type="checkbox" id="evNotable"> notable events</label>
         <label style="font-size:12px" title="Hide dual-use tooling package installs (nmap, tcpdump, ...) - context rows, not indicators."><input type="checkbox" id="evHideTool"> hide TOOLING</label>
         <span class="sep"></span>
@@ -341,20 +344,22 @@
           <button class="btn" id="procTreeBtn" title="Toggle between the flat process table and a collapsible parent/child tree.">Tree view</button></span>
         <span id="netFilters" class="hide"><span class="sep"></span>
           <label style="font-size:12px" title="Show only rows whose REMOTE address is a public (non-RFC1918/loopback/link-local) IP - the outbound/inbound internet traffic."><input type="checkbox" id="netPubOnly"> public IPs only</label>
-          <select id="netLocSel" title="Filter by resolved country of the remote address (needs online geo/ASN lookups; '(unresolved)' = public IP with no geo data)"><option value="">location: all</option></select>
-          <select id="netTypeSel" title="Filter by service type derived from well-known ports (SSH, HTTP, SMB, RDP, ...)"><option value="">type: all</option></select></span>
+          <span class="mdwrap" data-udrop="1"><button class="btn" id="netLocBtn" data-udrop="1" onclick="mdToggleBtn('netLoc')">location: all ▾</button><div id="netLocPanel" class="hide mdpanel" data-udrop="1"></div></span>
+          <span class="mdwrap" data-udrop="1"><button class="btn" id="netTypeBtn" data-udrop="1" onclick="mdToggleBtn('netType')">type: all ▾</button><div id="netTypePanel" class="hide mdpanel" data-udrop="1"></div></span></span>
         <span id="procSusWrap" class="hide"><span class="sep"></span>
-          <select id="procSusSel" title="Filter processes by suspicion category (the scoring tag): IOC hits, deleted binaries, hidden PIDs, web shells, memfd, temp-path execution, ... Counts shown per category."><option value="">suspicion: all</option></select></span>
+          <span class="mdwrap" data-udrop="1"><button class="btn" id="procSusBtn" data-udrop="1" onclick="mdToggleBtn('procSus')" title="Filter processes by suspicion category (scoring tag)">suspicion: all ▾</button><div id="procSusPanel" class="hide mdpanel" data-udrop="1"></div></span></span>
         <span id="usersFilters" class="hide"><span class="sep"></span>
           <span style="position:relative;display:inline-block" data-udrop="1">
             <button class="btn" id="usersDropBtn" data-udrop="1" title="Multiselect account filter - tick the accounts to show. Nothing ticked = all accounts.">accounts: all ▾</button>
             <div id="usersDropPanel" class="hide" data-udrop="1" style="position:absolute;top:105%;left:0;z-index:80;background:#161b22;border:1px solid #30363d;border-radius:6px;padding:6px 10px;max-height:220px;overflow:auto;min-width:170px;text-align:left"></div>
           </span>
-          <span class="lnk" id="usersSelClear" style="font-size:11px" title="Clear the account selection">clear</span></span>
+          <span class="lnk" id="usersSelClear" style="font-size:11px" title="Clear the account selection">clear</span>
+          <label style="font-size:12px" title="Show only accounts that can actually be logged into: interactive shell AND (password usable OR SSH keys present). '?' rows (shadow not collected) are treated as enabled if they have keys."><input type="checkbox" id="usersEnabledOnly"> enabled only</label>
+          <button class="btn" id="usersByGrpBtn" title="Switch to the group view: every group with its GID and member accounts (primary + supplementary). Click a group for the full member list. (v0.17)">By group</button></span>
         <span id="logonFilters" class="hide"><span class="sep"></span>
-          <select id="logfUser" title="Filter by user"><option value="">user: all</option></select>
-          <select id="logfSrc" title="Filter by source artifact"><option value="">source: all</option></select>
-          <select id="logfResult" title="Filter by result"><option value="">result: all</option></select>
+          <span class="mdwrap" data-udrop="1"><button class="btn" id="logfUserBtn" data-udrop="1" onclick="mdToggleBtn('logfUser')">user: all ▾</button><div id="logfUserPanel" class="hide mdpanel" data-udrop="1"></div></span>
+          <span class="mdwrap" data-udrop="1"><button class="btn" id="logfSrcBtn" data-udrop="1" onclick="mdToggleBtn('logfSrc')">source: all ▾</button><div id="logfSrcPanel" class="hide mdpanel" data-udrop="1"></div></span>
+          <span class="mdwrap" data-udrop="1"><button class="btn" id="logfResultBtn" data-udrop="1" onclick="mdToggleBtn('logfResult')">result: all ▾</button><div id="logfResultPanel" class="hide mdpanel" data-udrop="1"></div></span>
           <button class="btn" id="logonByIpBtn" title="Aggregate logons per source IP: first/last seen, failure + success counts, users tried, geo/ASN. The fastest brute-force triage view. (v0.11)">By source IP</button>
           <label style="font-size:12px" title="lastlog rows are per-account STATE (one row per account's most recent login), not events - they now live on the Users tab. Untick to mix them back into this event list."><input type="checkbox" id="logfHideLastlog" checked> hide lastlog rows</label></span>
         <span id="dateWrap" class="hide"><span class="sep"></span>
@@ -391,7 +396,7 @@
 <script language="JScript">
 "use strict";
 
-var APP_VERSION = "0.16.0";
+var APP_VERSION = "0.17.0";
 /* v0.9.4 - SQLECmd wrapper: offer to DOWNLOAD instead of hunt for it (operator request):
    - if the wrapper isn't found anywhere, a hand-off now offers to download the latest
      SQLECmd-Wrapper.hta from GitHub into THIS app's folder (browse stays as the offline
@@ -574,7 +579,8 @@ var TIMECAP = {shown:0, total:0};
 var HIDDENPIDS = {};                  // pid -> 1
 var PROCSCORE = {};                   // pid -> score (for network SUSPROC)
 var SORT = { proc:{k:0,d:-1}, net:{k:0,d:-1}, logon:{k:0,d:-1}, time:{k:1,d:-1}, ioc:{k:0,d:1},
-             web:{k:1,d:-1}, users:{k:1,d:1}, audit:{k:1,d:-1}, logonip:{k:5,d:-1} };   // v0.11
+             web:{k:1,d:-1}, users:{k:1,d:1}, audit:{k:1,d:-1}, logonip:{k:5,d:-1},
+             groups:{k:3,d:-1} };   // v0.11 / v0.17
 /* v0.8 datasets (browser DBs -> SQLECmd hand-off) */
 var BROWSERDBS = [];                  // detected browser SQLite DBs under user profiles
 var BDB_COMMON = "";                  // deepest common folder of all hits (analyze-all input)
@@ -3331,8 +3337,16 @@ function parseWebLogs(root){
 }
 
 /* ---- per-account view (passwd + group + shadow + lastlog + per-home artifacts) ---- */
+/* v0.17: can this account actually be logged into? true / false / null (shadow unknown) */
+function userEnabled(r){
+  if(!r.interactive) return false;
+  if(r.locked===true) return r.keys>0;        // password locked, but SSH keys still work
+  if(r.locked===false) return true;           // usable password (or empty)
+  return r.keys>0 ? true : null;              // shadow not collected: keys prove access, else unknown
+}
+var GROUPSV=[];
 function parseUsers(root){
-  USERS=[];
+  USERS=[]; GROUPSV=[];
   var pw=readLines(jp(root,"[root]/etc/passwd")); if(!pw.length) return;
   var gidName={}, userGroups={}, gl=readLines(jp(root,"[root]/etc/group")), i, t;
   for(i=0;i<gl.length;i++){ t=gl[i].split(":"); if(t.length<3) continue; gidName[t[2]]=t[0];
@@ -3368,6 +3382,21 @@ function parseUsers(root){
     USERS.push(r);
   }
   USERS.sort(function(a,b){ return a.uid-b.uid; });
+  // v0.17: group view - every group with its members (primary GID + supplementary lists)
+  var gUsers={}, gGid={}, gi, gj;
+  for(gi=0;gi<gl.length;gi++){ t=gl[gi].split(":"); if(t.length<3) continue; gGid[t[0]]=t[2]; }
+  for(gi=0;gi<USERS.length;gi++){ var gu=USERS[gi];
+    for(gj=0;gj<gu.groups.length;gj++){ var gn=gu.groups[gj];
+      if(!gUsers[gn]) gUsers[gn]={}; gUsers[gn][gu.user]=1; } }
+  for(var gk in gUsers){ if(!gUsers.hasOwnProperty(gk)) continue;
+    var members=keysOf(gUsers[gk]); members.sort();
+    var gr={kind:"group", group:gk, gid:(gGid[gk]!=null?gGid[gk]:""), userN:members.length, users:members,
+            score:0, tags:[], reasons:[]};
+    gr.blob=lc(gk+" "+members.join(" "));
+    if(gk==="docker" && members.length){ gr.score=1; gr.tags=["DOCKER-GRP"]; gr.reasons=["docker group members are root-equivalent via the socket"]; }
+    GROUPSV.push(gr);
+  }
+  GROUPSV.sort(function(a,b){ return b.userN-a.userN; });
 }
 
 /* ---- auditd detail (the closest Linux gets to process-creation telemetry) ----
@@ -3510,11 +3539,14 @@ function parseNetIdent(root){
   if(!ls.length) return;
   var cur=null, i, m;
   for(i=0;i<ls.length;i++){ var ln=ls[i];
-    m=ln.match(/^\d+:\s+([^:@\s]+)(?:@\S+)?:\s+</);   // `ip addr` interface header
-    if(m){ cur={iface:m[1], mac:"", ips:[]}; NETIDENT.push(cur); continue; }
+    m=ln.match(/^\d+:\s+([^:@\s]+)(?:@\S+)?:\s+<([^>]*)>/);   // `ip addr` interface header
+    if(m){ var st9=(ln.match(/\bstate\s+(UP|DOWN|UNKNOWN|DORMANT)/)||["",""])[1];
+      // v0.17: link state - explicit `state`, else the UP flag; UNKNOWN with LOWER_UP counts as up
+      var up9=(st9==="UP") || (st9!=="DOWN" && /(^|,)UP(,|$)/.test(m[2]));
+      cur={iface:m[1], mac:"", ips:[], link:(st9==="DOWN"?"DOWN":(up9?"UP":(st9||"?")))}; NETIDENT.push(cur); continue; }
     if(ln.charAt(0)!==" " && ln.charAt(0)!=="\t"){    // ifconfig interface header
-      m=ln.match(/^([A-Za-z0-9@._\-]+):?\s+(flags=|Link encap)/);
-      if(m){ cur={iface:m[1].replace(/:$/,""), mac:"", ips:[]}; NETIDENT.push(cur); continue; }
+      m=ln.match(/^([A-Za-z0-9@._\-]+):?\s+(flags=\d+<([^>]*)>|Link encap)/);
+      if(m){ cur={iface:m[1].replace(/:$/,""), mac:"", ips:[], link:(m[3]!=null?(/(^|,)UP(,|$)/.test(m[3])?"UP":"DOWN"):"?")}; NETIDENT.push(cur); continue; }
     }
     if(!cur) continue;
     m=ln.match(/(?:link\/ether|ether|HWaddr)\s+([0-9a-fA-F:]{17})/);
@@ -3583,15 +3615,51 @@ function netAddrHtml(){
   var H=['<h3 style="margin-top:14px">Network addresses</h3><div class="scroll" style="max-height:14vh"><table><thead><tr>'
     +'<th title="Friendly adaptor type derived from the interface name">Adaptor</th>'
     +'<th title="Kernel interface name">Interface</th>'
+    +'<th title="Link state at collection (ip addr state / UP flag)">Link</th>'
     +'<th title="Assigned IPv4/IPv6 addresses (loopback and link-local omitted)">IP address(es)</th>'
     +'<th title="Hardware (MAC) address">MAC</th></tr></thead><tbody>'];
   for(var i=0;i<NETIDENT.length && i<12;i++){ var n2=NETIDENT[i];
+    var lk=(n2.link==="UP")?'<span class="pgood">UP</span>':(n2.link==="DOWN"?'<span class="pmiss">DOWN</span>':'<span class="muted">'+esc(n2.link||"?")+'</span>');
     H.push('<tr><td>'+esc(ifaceLabel(n2.iface))+'</td><td class="mono">'+esc(n2.iface)+'</td>'
-      +'<td class="mono">'+esc(n2.ips.join(", ")||"-")+'</td><td class="mono muted">'+esc(n2.mac||"-")+'</td></tr>'); }
+      +'<td>'+lk+'</td><td class="mono">'+esc(n2.ips.join(", ")||"-")+'</td><td class="mono muted">'+esc(n2.mac||"-")+'</td></tr>'); }
   if(NETIDENT.length>12) H.push('<tr><td colspan="4" class="muted">+'+(NETIDENT.length-12)+' more interface(s) - see live_response/network/ip_addr.txt</td></tr>');
   H.push('</tbody></table></div>');
   return H.join("");
 }
+/* ---- v0.17: GENERIC checkbox-multiselect dropdown filters ----
+   One component drives every set-type filter (network type/location, logon user/source/result,
+   process suspicion, event kind). State lives in MDROP[key].sel; nothing selected = no filter.
+   Markup contract: a button id "<key>Btn" + panel div id "<key>Panel" class "mdpanel",
+   all carrying data-udrop so the click-outside close logic leaves them alone. */
+var MDROP={};
+function mdReg(key,label){ if(!MDROP[key]) MDROP[key]={sel:{},label:(label||key)}; else if(label) MDROP[key].label=label; return MDROP[key]; }
+function mdSet(key){ var m=MDROP[key]; if(!m) return null; for(var k in m.sel){ if(m.sel.hasOwnProperty(k)) return m.sel; } return null; }
+function mdPass(key,val){ var s=mdSet(key); return !s || s[String(val)]===1; }
+function mdPassAny(key,vals){ var s=mdSet(key); if(!s) return true;
+  for(var i=0;i<(vals||[]).length;i++){ if(s[String(vals[i])]===1) return true; } return false; }
+function mdCount(key){ var n=0,k,m=MDROP[key]; if(!m) return 0; for(k in m.sel){ if(m.sel.hasOwnProperty(k)) n++; } return n; }
+function mdDesc(key){ var s=mdSet(key); if(!s) return ""; var a=[],k; for(k in s){ if(s.hasOwnProperty(k)) a.push(k); } a.sort(); return a.join(", "); }
+function mdBtn(key){ var m=MDROP[key]; if(!m) return; var n=mdCount(key);
+  try{ var b=$(key+"Btn"); b.innerHTML=esc(m.label)+": "+(n?(n+" ✓"):"all")+" ▾"; b.className=n?"btn on":"btn";
+    b.title=n?("Filtering "+m.label+" to: "+mdDesc(key)+"  ·  click to change"):("Filter by "+m.label+" (tick any combination)"); }catch(e){} }
+function mdPopulate(key, counts){
+  var m=mdReg(key), el=$(key+"Panel"); if(!el) return;
+  var vals=[], k;
+  for(k in counts){ if(counts.hasOwnProperty(k)) vals.push({v:k, n:counts[k]}); }
+  vals.sort(function(a,b){ return a.v<b.v?-1:1; });
+  var h=['<div class="lnk" data-mdclear="'+esc(key)+'" style="font-size:11px;margin-bottom:4px">clear (show all)</div>'];
+  for(k=0;k<vals.length;k++){ var v=vals[k];
+    h.push('<label style="display:block;font-size:12px;white-space:nowrap;cursor:pointer"><input type="checkbox" data-md="'+esc(key)+'" data-mdv="'+esc(v.v)+'"'+(m.sel[v.v]?" checked":"")+'> '+esc(v.v)+(v.n>1?(' <span class="muted">('+nf(v.n)+')</span>'):'')+'</label>'); }
+  if(!vals.length) h.push('<div class="muted" style="font-size:11px">(no values in this capture)</div>');
+  el.innerHTML=h.join("");
+  mdBtn(key);
+}
+function mdCloseAll(exceptKey){ for(var k in MDROP){ if(!MDROP.hasOwnProperty(k) || k===exceptKey) continue;
+  try{ showEl(k+"Panel", false); }catch(e){} } try{ if(exceptKey!=="usersDrop") showEl("usersDropPanel", false); }catch(e2){} }
+function mdToggleBtn(key){ var p=$(key+"Panel"); if(!p) return; var wasHidden=/\bhide\b/.test(p.className);
+  mdCloseAll(key); showEl(key+"Panel", wasHidden); }
+function mdClearAll(){ for(var k in MDROP){ if(MDROP.hasOwnProperty(k)){ MDROP[k].sel={}; mdBtn(k); } } }
+
 /* ---- v0.16: multiselect account dropdown (Users tab) ---- */
 var USERS_SEL={};
 function usersSelSet(){ var k; for(k in USERS_SEL){ if(USERS_SEL.hasOwnProperty(k)) return USERS_SEL; } return null; }
@@ -3705,6 +3773,8 @@ var UCOLS=[
   {h:"UID", tip:"User id (0 = root; <1000 = system/service; >=1000 = human)", sk:function(r){return r.uid;}, cell:function(r){return '<td class="mono" style="text-align:center">'+r.uid+'</td>';}},
   {h:"User", tip:"Account name from /etc/passwd", sk:function(r){return lc(r.user);}, cell:function(r){return '<td class="mono">'+esc(r.user)+'</td>';}},
   {h:"Shell", tip:"Login shell (greyed = nologin/false - non-interactive)", sk:function(r){return lc(r.shell);}, cell:function(r){return '<td class="mono'+(r.interactive?'':' muted')+'">'+esc(r.shell)+'</td>';}},
+  {h:"Enabled", tip:"Can this account actually be logged into? yes = interactive shell + usable password or SSH keys; no = nologin shell or locked with no keys; ? = shadow not collected (non-root capture) and no keys to prove access", sk:function(r){var e=userEnabled(r);return e===true?"yes":(e===false?"no":"?");}, cell:function(r){var e=userEnabled(r);
+    return '<td style="text-align:center">'+(e===true?'<span class="pgood">yes</span>':(e===false?'<span class="pmiss">no</span>':'<span class="muted">?</span>'))+'</td>';}},
   {h:"Groups", tip:"Primary + supplementary groups (docker/sudo membership is scored)", sk:function(r){return r.groups.length;}, cell:function(r){var g=r.groups.join(", ");return '<td class="mono muted" title="'+esc(g)+'">'+esc(trunc(g,34))+'</td>';}},
   {h:"Password", tip:"shadow state: set / locked / EMPTY (passwordless login); '-' = shadow not collected (non-root capture)", sk:function(r){return r.locked===null?"":(r.locked?"locked":(r.hasPw?"set":"EMPTY"));}, cell:function(r){var v=r.locked===null?"-":(r.locked?"locked":(r.hasPw?"set":'<span class="err">EMPTY</span>'));return '<td class="mono" style="text-align:center">'+v+'</td>';}},
   {h:"SSH keys", tip:"authorized_keys entry count in this user's ~/.ssh", sk:function(r){return r.keys;}, cell:function(r){return '<td class="mono" style="text-align:center">'+(r.keys||"-")+'</td>';}},
@@ -3713,18 +3783,35 @@ var UCOLS=[
 ];
 /* v0.16: the multiselect dropdown engine (USERS_SEL / usersSelSet / populateUsersSel) lives with
    the other v0.16 helpers above the pivot section */
+var USERS_BYGRP=false;
+var GCOLS=[
+  {h:"Score / tags", tip:"Group-level flags (docker = root-equivalent membership)", sk:function(r){return r.score;}, cell:function(r){return scoreCell(r);}},
+  {h:"Group", tip:"Group name from /etc/group", sk:function(r){return lc(r.group);}, cell:function(r){return '<td class="mono">'+esc(r.group)+'</td>';}},
+  {h:"GID", tip:"Group id", sk:function(r){return parseInt(r.gid,10)||0;}, cell:function(r){return '<td class="mono" style="text-align:center">'+esc(r.gid)+'</td>';}},
+  {h:"Members", tip:"Number of accounts in the group (primary + supplementary)", sk:function(r){return r.userN;}, cell:function(r){return '<td class="mono" style="text-align:center">'+r.userN+'</td>';}},
+  {h:"Users", tip:"The member accounts - click the row for the full list", sk:function(r){return lc(r.users.join(","));}, cell:function(r){var u=r.users.join(", ");return '<td class="mono muted" title="'+esc(u)+'">'+esc(trunc(u,110))+'</td>';}}
+];
 function renderUsers(){
   populateUsersSel();
-  var sel=usersSelSet();
-  var rows=[], inter=0, svc=0;
+  // v0.17: group view - every group with member counts (answers "who is in sudo/docker?")
+  if(USERS_BYGRP){
+    var grows=[]; for(var g5=0;g5<GROUPSV.length;g5++){ if(passQ(GROUPSV[g5])) grows.push(GROUPSV[g5]); }
+    sortRows(grows,GCOLS,SORT.groups); drawTable(GCOLS,grows,SORT.groups,"groups");
+    if(!GROUPSV.length){ profileEmptyMsg(0,"groups (/etc/group not in this capture)"); return; }
+    $("count").innerHTML+=" · groups with their member accounts - By group again for the accounts view";
+    return;
+  }
+  var sel=usersSelSet(), enOnly=false; try{ enOnly=$("usersEnabledOnly").checked; }catch(ue){}
+  var rows=[], inter=0, svc=0, enb=0;
   for(var i=0;i<USERS.length;i++){ var r=USERS[i];
-    if(r.interactive) inter++; if(svcAccount(r.user)) svc++;
+    if(r.interactive) inter++; if(svcAccount(r.user)) svc++; if(userEnabled(r)===true) enb++;
     if(!passQ(r)) continue;
     if(sel && !sel[r.user]) continue;   // v0.14: multiselect account filter
+    if(enOnly && userEnabled(r)!==true) continue;   // v0.17: enabled-only filter
     rows.push(r); }
   sortRows(rows,UCOLS,SORT.users); drawTable(UCOLS,rows,SORT.users,"users");
   if(!USERS.length){ profileEmptyMsg(0,"accounts (/etc/passwd not in this capture)"); return; }
-  $("count").innerHTML+=" · "+nf(inter)+" interactive-shell, "+nf(svc)+" service accounts"+(USERS.length && USERS[0].locked===null?" · shadow not collected (lock state unknown)":"");
+  $("count").innerHTML+=" · "+nf(inter)+" interactive-shell, "+nf(enb)+" enabled, "+nf(svc)+" service accounts"+(USERS.length && USERS[0].locked===null?" · shadow not collected (lock state unknown - Enabled shows ?)":"");
 }
 var ACOLS=[
   {h:"Score / tags", tip:"Suspicion score (>=3 is flagged) plus scoring tags - hover a tag for the full reasons", sk:function(r){return r.score;}, cell:function(r){return scoreCell(r);}},
@@ -3960,7 +4047,7 @@ function cloudInitHtml(){
 /* v0.14: journalctl --list-boots table (moved from the Logs tab - boot cadence is capture context) */
 function bootsHtml(){
   if(!BOOTS.length) return "";
-  var H=['<h3 style="margin-top:14px">Boots <span class="muted" style="font-weight:400;text-transform:none">- journalctl --list-boots; &gt;2-day between-boot gaps are flagged in Log integrity</span></h3>'];
+  var H=['<h3 style="margin-top:14px">Boot history <span class="muted" style="font-weight:400;text-transform:none">- journalctl --list-boots; &gt;2-day between-boot gaps are flagged in Log integrity</span></h3>'];
   H.push('<div class="scroll" style="max-height:16vh"><table><thead><tr>'
     +'<th title="Boot index (0 = current boot, negative = earlier boots)">Idx</th>'
     +'<th title="journald boot id (truncated)">Boot ID</th>'
@@ -4230,11 +4317,15 @@ function renderPackages(){
     +(susN?(' <span class="tag sus">'+susN+' suspicious</span>'):'')
     +(manual?(' <span class="tag info">'+manual+' user-requested</span>'):(PKGS.length?' <span class="tag info">all automated</span>':''));
   if(!PKGS.length){ $("pkgTbl").innerHTML=""; return; }
+  // v0.17: suspicious-only filter (watchlist tooling + IOC matches)
+  var susOnly2=false; try{ susOnly2=$("pkgSusOnly").checked; }catch(eps){}
+  var PLIST=PKGS;
+  if(susOnly2){ PLIST=[]; for(var z2=0;z2<PKGS.length;z2++){ if(PKGS[z2].susp || iocHit(PKGS[z2].blob)) PLIST.push(PKGS[z2]); } }
   var h='<thead><tr><th title="Install/change time (normalized from the host-local apt/dpkg logs; obeys the host-TZ toggle)">When ('+esc(tzLabel())+')</th>'
     +'<th title="install / upgrade / remove / purge / downgrade">Action</th>'
     +'<th title="Package name (SUS chip = dual-use tooling watchlist; IOC = matched your IOC list)">Package</th>'
     +'<th title="Requested-By from apt history - separates a human apt install from unattended upgrades">Requested by</th></tr></thead><tbody>';
-  for(var i=0;i<PKGS.length && i<300;i++){ var p=PKGS[i]; var isIoc=iocHit(p.blob); var cls=isIoc?"ioc row-flag":(p.susp?"row-warn":"");
+  for(var i=0;i<PLIST.length && i<300;i++){ var p=PLIST[i]; var isIoc=iocHit(p.blob); var cls=isIoc?"ioc row-flag":(p.susp?"row-warn":"");
     var pep=pkgEpoch(p);   // v0.16: display normalized UTC/host-TZ time, not the raw host-local log string
     h+='<tr'+(cls?(' class="'+cls+'"'):'')+'><td class="mono'+((isIoc||p.susp)?' first':'')+'" title="'+esc(p.mgr)+' raw: '+esc(p.when)+'">'+esc(pep?fmtTime(pep,false):p.when)+'</td>'
       +'<td class="mono muted">'+esc(p.action)+'</td>'
@@ -4319,20 +4410,15 @@ function profileEmptyMsg(n, what){ if(n>0) return false;
   $("tbl").innerHTML='<thead><tr><th>'+esc(what)+'</th></tr></thead><tbody><tr><td class="muted">'+esc(msg)+'</td></tr></tbody>';
   $("count").innerHTML="0 rows"; return true; }
 var PROC_TREE=false, PTREE_COLLAPSED={};
-/* v0.16: suspicion-category filter (by scoring tag, with counts) - orthogonal to "flagged only" */
+/* v0.16/v0.17: suspicion-category multiselect (by scoring tag, with counts) - orthogonal to "flagged only" */
 function populateProcSus(){
-  var el=$("procSusSel"); if(!el) return; var cur=el.value;
   var cnt={}, i, t2;
   for(i=0;i<PROC.length;i++){ var tg=PROC[i].tags||[]; for(t2=0;t2<tg.length;t2++){ cnt[tg[t2]]=(cnt[tg[t2]]||0)+1; } }
-  var keys=keysOf(cnt); keys.sort();
-  var opts=['<option value="">suspicion: all</option>'];
-  for(i=0;i<keys.length;i++) opts.push('<option value="'+esc(keys[i])+'"'+(keys[i]===cur?" selected":"")+'>'+esc(keys[i])+' ('+cnt[keys[i]]+')</option>');
-  el.innerHTML=opts.join(""); if(cur) el.value=cur;
+  mdPopulate("procSus", cnt);
 }
 function procPass(r){
   if(!passQ(r)) return false;
-  var ft=""; try{ ft=$("procSusSel").value; }catch(e){}
-  return !ft || hasTag(r,ft);
+  return mdPassAny("procSus", r.tags||[]);   // v0.17: row passes if ANY of its tags is ticked
 }
 function renderProc(){
   populateProcSus();
@@ -4394,26 +4480,26 @@ var NCOLS=[
 ];
 function netLocOf(r){ if(!r.peerAddr || ipIsLocal(r.peerAddr)) return "";
   var g=GEO[r.peerAddr]; return g&&g.country?g.country:"(unresolved)"; }
-function populateNetLoc(){
-  var seen={}, i; for(i=0;i<NET.length;i++){ var lv=netLocOf(NET[i]); if(lv) seen[lv]=1; }
-  fillSelect("netLocSel","location",keysOf(seen));
-}
-function populateNetType(){
-  var seen={}, i; for(i=0;i<NET.length;i++){ var sv=netSvcOf(NET[i]); if(sv) seen[sv]=1; }
-  fillSelect("netTypeSel","type",keysOf(seen));
+/* v0.17: location population lives in populateNetFilters (checkbox multiselect) */
+function populateNetFilters(){   // v0.17: checkbox multiselects with counts
+  var locs={}, types={}, i;
+  for(i=0;i<NET.length;i++){ var lv=netLocOf(NET[i]); if(lv) locs[lv]=(locs[lv]||0)+1;
+    var sv=netSvcOf(NET[i]); if(sv) types[sv]=(types[sv]||0)+1; }
+  mdPopulate("netLoc", locs); mdPopulate("netType", types);
 }
 function renderNet(){
-  var pub=false, floc="", ftype=""; try{ pub=$("netPubOnly").checked; floc=$("netLocSel").value; ftype=$("netTypeSel").value; }catch(enp){}
-  populateNetLoc(); populateNetType();
+  var pub=false; try{ pub=$("netPubOnly").checked; }catch(enp){}
+  populateNetFilters();
   var rows=[]; for(var i=0;i<NET.length;i++){ var r=NET[i];
     if(!passQ(r)) continue;
     // v0.13: "public IPs only" - rows whose remote end is a routable public address
     if(pub && !(r.peerAddr && !ipIsLocal(r.peerAddr))) continue;
-    if(floc && netLocOf(r)!==floc) continue;   // v0.14: location filter (resolved country)
-    if(ftype && netSvcOf(r)!==ftype) continue; // v0.16: service-type filter
+    if(!mdPass("netLoc", netLocOf(r))) continue;    // v0.17: multiselect location filter
+    if(!mdPass("netType", netSvcOf(r))) continue;   // v0.17: multiselect service-type filter
     rows.push(r); }
   sortRows(rows,NCOLS,SORT.net); drawTable(NCOLS,rows,SORT.net,"net");
-  if((pub||floc||ftype) && NET.length) $("count").innerHTML+=" ·"+(pub?" public-remote":"")+(floc?(" location="+esc(floc)):"")+(ftype?(" type="+esc(ftype)):"")+" rows only";
+  var fl2=[]; if(pub) fl2.push("public-remote"); if(mdSet("netLoc")) fl2.push("location: "+mdDesc("netLoc")); if(mdSet("netType")) fl2.push("type: "+mdDesc("netType"));
+  if(fl2.length && NET.length) $("count").innerHTML+=" · "+esc(fl2.join(" · "))+" only";
   profileEmptyMsg(NET.length,"network connections"); }
 
 /* logon table (v0.2) */
@@ -4447,10 +4533,13 @@ function fillSelect(id, label, values){ var el=$(id); if(!el) return; var cur=el
   var opts=['<option value="">'+label+': all</option>']; values.sort();
   for(var i=0;i<values.length;i++){ var v=values[i]; opts.push('<option value="'+esc(v)+'"'+(v===cur?" selected":"")+'>'+esc(trunc(v,28))+'</option>'); }
   el.innerHTML=opts.join(""); if(cur){ el.value=cur; } }
-function populateLogonFilters(){
+function populateLogonFilters(){   // v0.17: checkbox multiselects with counts
   var us={}, ss={}, rs={}, i;
-  for(i=0;i<LOGON.length;i++){ var r=LOGON[i]; if(r.user) us[trimStr(r.user)]=1; ss[logonSrcType(r)]=1; rs[r.result]=1; }
-  fillSelect("logfUser","user",keysOf(us)); fillSelect("logfSrc","source",keysOf(ss)); fillSelect("logfResult","result",keysOf(rs));
+  for(i=0;i<LOGON.length;i++){ var r=LOGON[i];
+    var un=trimStr(r.user); if(un) us[un]=(us[un]||0)+1;
+    var st=logonSrcType(r); if(st) ss[st]=(ss[st]||0)+1;
+    if(r.result) rs[r.result]=(rs[r.result]||0)+1; }
+  mdPopulate("logfUser", us); mdPopulate("logfSrc", ss); mdPopulate("logfResult", rs);
 }
 function keysOf(o){ var a=[],k; for(k in o){ if(o.hasOwnProperty(k)&&k) a.push(k); } return a; }
 function renderLogon(){
@@ -4465,16 +4554,16 @@ function renderLogon(){
     return;
   }
   populateLogonFilters();
-  var fu=$("logfUser").value, fs=$("logfSrc").value, fr=$("logfResult").value;
   var hideLL=true; try{ hideLL=$("logfHideLastlog").checked; }catch(ehl){}
-  var llHidden=0;
+  var frSel=mdSet("logfResult"), llHidden=0;
   var rows=[]; for(var i=0;i<LOGON.length;i++){ var r=LOGON[i];
     if(!passQ(r)) continue;
-    if(fu && trimStr(r.user)!==fu) continue;
-    if(fs && logonSrcType(r)!==fs) continue;
-    if(fr && r.result!==fr) continue;
-    // v0.15: lastlog rows are per-account STATE (shown on Users) - hidden here by default
-    if(hideLL && r.result==="last-login" && !fr){ llHidden++; continue; }
+    if(!mdPass("logfUser", trimStr(r.user))) continue;      // v0.17 multiselects
+    if(!mdPass("logfSrc", logonSrcType(r))) continue;
+    if(!mdPass("logfResult", r.result)) continue;
+    // v0.15: lastlog rows are per-account STATE (shown on Users) - hidden here by default,
+    // unless the result filter explicitly includes last-login
+    if(hideLL && r.result==="last-login" && !(frSel && frSel["last-login"])){ llHidden++; continue; }
     if((DFROM||DTO) && r.epoch){ if(!inDay(logonDay(r.epoch))) continue; }   // case window filters logons too
     rows.push(r); }
   sortRows(rows,LCOLS,SORT.logon); drawTable(LCOLS,rows,SORT.logon,"logon");
@@ -4592,15 +4681,15 @@ function renderLogs(){
 var EVFROM=0, EVTO=0, EVQ="";
 /* v0.14: the "notable" event kinds (the Logs-tab notable-events set + boots/journal anomalies) */
 var NOTABLE_KINDS={ oom:1, promisc:1, usb:1, module:1, hosts:1, cron:1, units:1, boot:1, "journal-gap":1, attribution:1 };
-function populateEvKind(){ var ks={}, i; for(i=0;i<EVENTS.length;i++) ks[EVENTS[i].kind]=1; fillSelect("evKind","kind",keysOf(ks)); }
+function populateEvKind(){ var ks={}, i; for(i=0;i<EVENTS.length;i++){ ks[EVENTS[i].kind]=(ks[EVENTS[i].kind]||0)+1; } mdPopulate("evKind", ks); }
 function renderEvents(){
   populateEvKind();
-  var minSc=parseInt($("evMinScore").value,10)||0, fkind=$("evKind").value;
+  var minSc=parseInt($("evMinScore").value,10)||0;
   var hideTool=false, notable=false; try{ hideTool=$("evHideTool").checked; notable=$("evNotable").checked; }catch(eht){}
   var rows=[], i;
   for(i=0;i<EVENTS.length;i++){ var e=EVENTS[i];
     if(e.score<minSc) continue;
-    if(fkind && e.kind!==fkind) continue;
+    if(!mdPass("evKind", e.kind)) continue;   // v0.17 multiselect
     if(notable && !NOTABLE_KINDS[e.kind]) continue; // v0.14: notable-events filter
     if(hideTool && hasTag(e,"TOOLING")) continue;   // v0.11: dual-use installs are context, hideable
     if(EVQ && e.blob.indexOf(EVQ)<0) continue;
@@ -4765,6 +4854,12 @@ function openRowDetail(idx){
     h+=detField("Log file", r.src);
     h+='</div>';
     if(r.epoch) h+='<div class="dl"><span class="lnk" onclick="pivotTimeline('+r.epoch+')" title="What changed on disk around this request (web-shell plant)?">Open Timeline ±15 min around this request</span></div>';
+  } else if(TAB==="users" && r.kind==="group"){
+    h+='<div style="font-size:14px;margin-bottom:6px"><b>'+esc(r.group)+' (gid '+esc(r.gid)+')</b> '+tagsHtml(r)+'</div>';
+    h+=reasonsBlock(r);
+    h+='<div class="dl">';
+    h+=detField("Members ("+r.userN+")", r.users.join(", ")||"(none)");
+    h+='</div>';
   } else if(TAB==="users"){
     h+='<div style="font-size:14px;margin-bottom:6px"><b>'+esc(r.user)+' (uid '+r.uid+')</b> '+tagsHtml(r)+'</div>';
     h+=reasonsBlock(r);
@@ -4772,6 +4867,7 @@ function openRowDetail(idx){
     h+=detField("Shell", r.shell+(r.interactive?"":"  (non-interactive)"));
     h+=detField("Home", r.home);
     h+=detField("Groups", r.groups.join(", ")||"-");
+    h+=detField("Enabled", (function(){ var e=userEnabled(r); return e===true?"yes - interactive shell with usable password or SSH keys":(e===false?"no - non-interactive shell, or locked with no keys":"unknown - shadow not collected and no SSH keys to prove access"); })());
     h+=detField("Password", r.locked===null?"shadow not collected":(r.locked?"locked/disabled":(r.hasPw?"hash set":"EMPTY - passwordless login")));
     h+=detField("authorized_keys entries", String(r.keys));
     h+=detField("Shell-history lines", nf(r.hist));
@@ -4911,9 +5007,12 @@ function exportView(){
   else if(TAB==="web"){ head=["Score","Tags","When_"+tzLabel(),"ClientIP","Geo","ASN","Method","Status","Bytes","URI","Referer","UserAgent","Log"]; lines=[head.join(",")];
     for(var wi=0;wi<rows.length;wi++){ var wr=rows[wi]; var wg=GEO[wr.ip]||{};
       lines.push([cq(wr.score),cq(wr.tags.join(";")),cq(wr.epoch?fmtTime(wr.epoch,true):""),cq(wr.ip),cq(wg.country||""),cq(wg.asn||""),cq(wr.method),cq(wr.status),cq(wr.bytes),cq(wr.uri),cq(wr.ref),cq(wr.ua),cq(wr.src)].join(",")); } }
-  else if(TAB==="users"){ head=["Score","Tags","UID","User","Shell","Groups","Password","SSHKeys","HistoryLines","LastLogin_"+tzLabel(),"LastIP"]; lines=[head.join(",")];
-    for(var ui=0;ui<rows.length;ui++){ var ur=rows[ui];
-      lines.push([cq(ur.score),cq(ur.tags.join(";")),cq(ur.uid),cq(ur.user),cq(ur.shell),cq(ur.groups.join(";")),cq(ur.locked===null?"":(ur.locked?"locked":(ur.hasPw?"set":"EMPTY"))),cq(ur.keys),cq(ur.hist),cq(ur.lastEp?fmtTime(ur.lastEp,true):""),cq(ur.lastIp)].join(",")); } }
+  else if(TAB==="users" && USERS_BYGRP){ head=["Group","GID","Members","Users"]; lines=[head.join(",")];
+    for(var gi2=0;gi2<rows.length;gi2++){ var gr2=rows[gi2];
+      lines.push([cq(gr2.group),cq(gr2.gid),cq(gr2.userN),cq(gr2.users.join("; "))].join(",")); } }
+  else if(TAB==="users"){ head=["Score","Tags","UID","User","Shell","Enabled","Groups","Password","SSHKeys","HistoryLines","LastLogin_"+tzLabel(),"LastIP"]; lines=[head.join(",")];
+    for(var ui=0;ui<rows.length;ui++){ var ur=rows[ui]; var ue2=userEnabled(ur);
+      lines.push([cq(ur.score),cq(ur.tags.join(";")),cq(ur.uid),cq(ur.user),cq(ur.shell),cq(ue2===true?"yes":(ue2===false?"no":"?")),cq(ur.groups.join(";")),cq(ur.locked===null?"":(ur.locked?"locked":(ur.hasPw?"set":"EMPTY"))),cq(ur.keys),cq(ur.hist),cq(ur.lastEp?fmtTime(ur.lastEp,true):""),cq(ur.lastIp)].join(",")); } }
   else if(TAB==="audit"){ head=["Score","Tags","When_"+tzLabel(),"Type","User","SourceIP","Result","Detail","AuditId"]; lines=[head.join(",")];
     for(var xi=0;xi<rows.length;xi++){ var xr=rows[xi];
       lines.push([cq(xr.score),cq(xr.tags.join(";")),cq(xr.epoch?fmtTime(xr.epoch,true):""),cq(xr.typ),cq(xr.user),cq(xr.ip),cq(xr.res),cq(xr.detail),cq(xr.id)].join(",")); } }
@@ -4958,6 +5057,11 @@ function copyNotes(){
     else if(TAB==="logon") out.push(r.score+" | "+logonWhenCell(r)+" | "+r.result+" | "+r.user+" from "+(r.ip||"local")+(r.cmd?(" | "+r.cmd):"")+(r.tags.length?(" | "+r.tags.join(",")):""));
     else if(TAB==="time") out.push(r.score+" | "+epochShort(r.mtime)+" | "+r.mode+" | "+r.path+(r.tags.length?(" | "+r.tags.join(",")):""));
     else if(TAB==="ioc") out.push(r.file+":"+r.line+" | "+r.ioc+" | "+r.excerpt);
+    // v0.17: the newer tabs copy too
+    else if(TAB==="users" && r.kind==="group") out.push(r.group+" (gid "+r.gid+") | "+r.userN+" member(s) | "+r.users.join(", "));
+    else if(TAB==="users") out.push(r.score+" | uid "+r.uid+" | "+r.user+" | "+r.shell+" | enabled:"+(function(){var e=userEnabled(r);return e===true?"yes":(e===false?"no":"?");})()+" | keys:"+r.keys+" | last:"+(r.lastEp?fmtTime(r.lastEp,false):"-")+(r.tags.length?(" | "+r.tags.join(",")):""));
+    else if(TAB==="web") out.push(r.score+" | "+(r.epoch?fmtTime(r.epoch,true):"-")+" | "+r.ip+" | "+r.method+" "+r.status+" | "+r.uri+(r.tags.length?(" | "+r.tags.join(",")):""));
+    else if(TAB==="audit") out.push(r.score+" | "+fmtTime(r.epoch,true)+" | "+r.typ+" | "+r.user+" | "+r.detail+(r.tags.length?(" | "+r.tags.join(",")):""));
   }
   try{ window.clipboardData.setData("Text", out.join("\r\n")); setStatus("Copied "+out.length+" lines to clipboard","ok"); }
   catch(e){ setStatus("Copy failed: "+e.message,"err"); }
@@ -5153,19 +5257,19 @@ function activeFilterDesc(){
   if(QUERY) f.push('search "'+QUERY+'"');
   if(SUSONLY) f.push("flagged-only (score >= 3)");
   if(DFROM||DTO) f.push("case window "+($("dfrom").value||"…")+" to "+($("dto").value||"…"));
-  try{ if($("logfUser").value) f.push("logon user = "+$("logfUser").value);
-    if($("logfSrc").value) f.push("logon source = "+$("logfSrc").value);
-    if($("logfResult").value) f.push("logon result = "+$("logfResult").value); }catch(e1){}
-  try{ if($("netPubOnly").checked) f.push("network: public IPs only");
-    if($("netLocSel").value) f.push("network location = "+$("netLocSel").value);
-    if($("netTypeSel").value) f.push("network type = "+$("netTypeSel").value); }catch(e2){}
-  try{ if($("procSusSel").value) f.push("process suspicion = "+$("procSusSel").value); }catch(e2b){}
+  if(mdSet("logfUser")) f.push("logon user in ["+mdDesc("logfUser")+"]");
+  if(mdSet("logfSrc")) f.push("logon source in ["+mdDesc("logfSrc")+"]");
+  if(mdSet("logfResult")) f.push("logon result in ["+mdDesc("logfResult")+"]");
+  try{ if($("netPubOnly").checked) f.push("network: public IPs only"); }catch(e2){}
+  if(mdSet("netLoc")) f.push("network location in ["+mdDesc("netLoc")+"]");
+  if(mdSet("netType")) f.push("network type in ["+mdDesc("netType")+"]");
+  if(mdSet("procSus")) f.push("process suspicion in ["+mdDesc("procSus")+"]");
   try{ if($("pfMinScore").value!=="1") f.push("persistence score >= "+$("pfMinScore").value); }catch(e2c){}
   if(usersSelSet()) f.push("selected accounts only (Users tab)");
   try{ if((parseInt($("evMinScore").value,10)||0)>0) f.push("events score >= "+$("evMinScore").value);
-    if($("evKind").value) f.push("events kind = "+$("evKind").value);
     if($("evNotable").checked) f.push("notable events only");
     if($("evHideTool").checked) f.push("TOOLING hidden"); }catch(e3){}
+  if(mdSet("evKind")) f.push("events kind in ["+mdDesc("evKind")+"]");
   if(EVQ) f.push('events search "'+EVQ+'"');
   if(EVFROM||EVTO) f.push("events window");
   if(PIVOT) f.push("timeline pivot ±15 min @ "+fmtTime(PIVOT.center,true));
@@ -5185,18 +5289,16 @@ function generateReport(){
     var _P=F(PROC), _T=F(TIMEL), _W=F(WEBLOG), _A=F(AUDITX), _PF=F(PERSFIND), _K=F(PKGS), _C=F(CONTAINERS), _LA=F(LATERAL), _E=EVENTS, _N=F(NET), _L=F(LOGON), _U=F(USERS);
     if(useFilters){
       var b1=[],i7,r7;
-      var pub=false, floc="", ft6=""; try{ pub=$("netPubOnly").checked; floc=$("netLocSel").value; ft6=$("netTypeSel").value; }catch(en2){}
-      if(pub||floc||ft6){ for(i7=0;i7<_N.length;i7++){ r7=_N[i7];
+      var pub=false; try{ pub=$("netPubOnly").checked; }catch(en2){}
+      if(pub||mdSet("netLoc")||mdSet("netType")){ for(i7=0;i7<_N.length;i7++){ r7=_N[i7];
         if(pub && !(r7.peerAddr && !ipIsLocal(r7.peerAddr))) continue;
-        if(floc && netLocOf(r7)!==floc) continue;
-        if(ft6 && netSvcOf(r7)!==ft6) continue; b1.push(r7); } _N=b1; }
-      var ps6=""; try{ ps6=$("procSusSel").value; }catch(ep6){}
-      if(ps6){ b1=[]; for(i7=0;i7<_P.length;i7++){ if(hasTag(_P[i7],ps6)) b1.push(_P[i7]); } _P=b1; }
-      var fu="",fs2="",fr2=""; try{ fu=$("logfUser").value; fs2=$("logfSrc").value; fr2=$("logfResult").value; }catch(el2){}
+        if(!mdPass("netLoc", netLocOf(r7))) continue;
+        if(!mdPass("netType", netSvcOf(r7))) continue; b1.push(r7); } _N=b1; }
+      if(mdSet("procSus")){ b1=[]; for(i7=0;i7<_P.length;i7++){ if(mdPassAny("procSus",_P[i7].tags||[])) b1.push(_P[i7]); } _P=b1; }
       b1=[]; for(i7=0;i7<_L.length;i7++){ r7=_L[i7];
-        if(fu && trimStr(r7.user)!==fu) continue;
-        if(fs2 && logonSrcType(r7)!==fs2) continue;
-        if(fr2 && r7.result!==fr2) continue;
+        if(!mdPass("logfUser", trimStr(r7.user))) continue;
+        if(!mdPass("logfSrc", logonSrcType(r7))) continue;
+        if(!mdPass("logfResult", r7.result)) continue;
         if((DFROM||DTO) && r7.epoch && !inDay(logonDay(r7.epoch))) continue;
         b1.push(r7); } _L=b1;
       var us2=usersSelSet();
@@ -5204,10 +5306,10 @@ function generateReport(){
       if(PIVOT){ b1=[]; for(i7=0;i7<_T.length;i7++){ r7=_T[i7];
         if((r7.mtime>=PIVOT.from&&r7.mtime<=PIVOT.to)||(r7.ctime>=PIVOT.from&&r7.ctime<=PIVOT.to)
          ||(r7.crtime>=PIVOT.from&&r7.crtime<=PIVOT.to)||(r7.atime>=PIVOT.from&&r7.atime<=PIVOT.to)) b1.push(r7); } _T=b1; }
-      var mS=0,fk="",noT=false,hiT=false; try{ mS=parseInt($("evMinScore").value,10)||0; fk=$("evKind").value; noT=$("evNotable").checked; hiT=$("evHideTool").checked; }catch(ee2){}
+      var mS=0,noT=false,hiT=false; try{ mS=parseInt($("evMinScore").value,10)||0; noT=$("evNotable").checked; hiT=$("evHideTool").checked; }catch(ee2){}
       b1=[]; for(i7=0;i7<EVENTS.length;i7++){ var e7=EVENTS[i7];
         if(e7.score<mS) continue;
-        if(fk && e7.kind!==fk) continue;
+        if(!mdPass("evKind", e7.kind)) continue;
         if(noT && !NOTABLE_KINDS[e7.kind]) continue;
         if(hiT && hasTag(e7,"TOOLING")) continue;
         if(EVQ && e7.blob.indexOf(EVQ)<0) continue;
@@ -5261,7 +5363,7 @@ function generateReport(){
       "Log-integrity findings (tamper / rotation / layout checks)."));
     if(_LA.length) ov.push('<h3>Lateral movement evidence</h3>'+repTable(["Evidence","User","Destination","Detail"],
       repRows(_LA, 200, function(r){ return {cls:repCls(r.score)||(r.corrob?"warn":""), cells:[r.kind+(r.corrob?" CORROB":""), r.user, r.dest+(geoTip(r.dest)?(" ["+geoTip(r.dest)+"]"):""), r.evidence]}; }, true)));
-    if(BOOTS.length) ov.push('<h3>Boots (journalctl --list-boots, host local time)</h3>'+repTable(["Idx","Boot ID","First entry","Last entry"],
+    if(BOOTS.length) ov.push('<h3>Boot history (journalctl --list-boots)</h3>'+repTable(["Idx","Boot ID","First entry","Last entry"],
       repRows(BOOTS, 60, function(r){ return {cls:"", cells:[r.idx, r.id.substring(0,12)+"…", r.first, r.last]}; })));
     section("overview","Overview", ov.join(""));
     // --- Inventory ---
@@ -5423,7 +5525,9 @@ function init(){
   $("evfrom").onchange=function(){ EVFROM=dayNum(this.value); render(); };
   $("evto").onchange=function(){ EVTO=dayNum(this.value); render(); };
   $("evMinScore").onchange=function(){ render(); };
-  $("evKind").onchange=function(){ render(); };
+  // v0.17: register the multiselect filters (labels drive the button text)
+  mdReg("netLoc","location"); mdReg("netType","type"); mdReg("logfUser","user");
+  mdReg("logfSrc","source"); mdReg("logfResult","result"); mdReg("procSus","suspicion"); mdReg("evKind","kind");
   $("evTz").onclick=function(){ setTz(this.checked); };
   $("evExport").onclick=exportEvents;
   $("evHideTool").onclick=function(){ render(); };
@@ -5440,25 +5544,22 @@ function init(){
   };
   // Processes: flat table <-> collapsible tree
   $("procTreeBtn").onclick=function(){ PROC_TREE=!PROC_TREE; this.className=PROC_TREE?"btn on":"btn"; this.innerHTML=PROC_TREE?"Table view":"Tree view"; render(); };
-  // Logon filters
-  $("logfUser").onchange=function(){ render(); };
-  $("logfSrc").onchange=function(){ render(); };
-  $("logfResult").onchange=function(){ render(); };
   $("netPubOnly").onclick=function(){ render(); };      // v0.13
   $("reportBtn").onclick=generateReport;                // v0.13
-  $("netLocSel").onchange=function(){ render(); };      // v0.14
   $("evNotable").onclick=function(){ render(); };       // v0.14
   // v0.16: multiselect dropdown replaces the listbox
   $("usersDropBtn").onclick=function(){ var p=$("usersDropPanel"); showEl("usersDropPanel", /\bhide\b/.test(p.className)); };
   $("usersSelClear").onclick=function(){ USERS_SEL={}; renderUsersDropBtn(); render(); };
   $("logfHideLastlog").onclick=function(){ render(); };  // v0.15
-  $("netTypeSel").onchange=function(){ render(); };      // v0.16
-  $("procSusSel").onchange=function(){ render(); };      // v0.16
   $("pfMinScore").onchange=function(){ render(); };      // v0.16
+  $("pkgSusOnly").onclick=function(){ render(); };       // v0.17
+  $("usersEnabledOnly").onclick=function(){ render(); }; // v0.17
+  $("usersByGrpBtn").onclick=function(){ USERS_BYGRP=!USERS_BYGRP; this.className=USERS_BYGRP?"btn on":"btn"; render(); };  // v0.17
   $("dfrom").onchange=function(){ DFROM=dayNum(this.value); if(LASTROOT){ reparseTimeline(); } };
   $("dto").onchange=function(){ DTO=dayNum(this.value); if(LASTROOT){ reparseTimeline(); } };
   $("clearBtn").onclick=function(){ $("q").value=""; QUERY=""; $("susOnly").checked=false; SUSONLY=false;
-    try{ $("logfUser").value=""; $("logfSrc").value=""; $("logfResult").value=""; }catch(e){} render(); };
+    mdClearAll(); USERS_SEL={}; renderUsersDropBtn();   // v0.17: clears every multiselect filter too
+    try{ $("netPubOnly").checked=false; }catch(e){} render(); };
   $("exportBtn").onclick=exportView;
   $("copyBtn").onclick=copyNotes;
 
@@ -5488,7 +5589,13 @@ function init(){
     // v0.16: users-dropdown - checkbox toggles select; any click outside the panel closes it
     var uSel=attrUp(t,"data-usel");
     if(uSel){ if(USERS_SEL[uSel]) delete USERS_SEL[uSel]; else USERS_SEL[uSel]=1; renderUsersDropBtn(); render(); return; }
-    if(!attrUp(t,"data-udrop")){ var udp=$("usersDropPanel"); if(udp && !/\bhide\b/.test(udp.className)) showEl("usersDropPanel",false); }
+    // v0.17: generic multiselect checkbox / clear-link clicks
+    var mdk=attrUp(t,"data-md");
+    if(mdk){ var mdv2=attrUp(t,"data-mdv"); var mo=mdReg(mdk);
+      if(mo.sel[mdv2]) delete mo.sel[mdv2]; else mo.sel[mdv2]=1; mdBtn(mdk); render(); return; }
+    var mdc=attrUp(t,"data-mdclear");
+    if(mdc){ mdReg(mdc).sel={}; mdBtn(mdc); render(); return; }
+    if(!attrUp(t,"data-udrop")){ mdCloseAll(); var udp=$("usersDropPanel"); if(udp && !/\bhide\b/.test(udp.className)) showEl("usersDropPanel",false); }
     // v0.16: click a public remote IP -> VirusTotal (launches the default browser)
     var vt2=attrUp(t,"data-vt"); if(vt2){ openUrl("https://www.virustotal.com/gui/ip-address/"+vt2); return; }
     var op=attrUp(t,"data-open"); if(op){ openInExplorer(op); return; }
@@ -5572,6 +5679,7 @@ window.onload=function(){ init(); try{ window.setTimeout(checkSelfUpdate,600); }
       <li><b>Inventory tab</b> - a map of every key artifact (processes, network, logons, accounts, persistence, system, filesystem, logs, containers) showing present/absent, size, and an <b>open folder</b> link that opens the raw file in Explorer. The Persistence &amp; config inventory on Overview has the same open-folder links; click an artifact name there to view its contents inline.</li>
       <li><b>UI (v0.7):</b> the Processes table has a <b>Name</b> column and a <b>Tree view</b> toggle (collapsible parent/child hierarchy - click ▸/▾ to fold, a row for detail). <b>Logons</b> has User / Source / Result filters and a clickable link to each raw source log. <b>Events</b> has a min-score filter and a kind filter. Long tables keep their <b>header row frozen</b> while scrolling, and <b>Persistence &amp; system findings</b> shows a date/time column.</li>
       <li><b>Resizable columns</b> everywhere - drag the right edge of any column header (it highlights on hover); double-click the edge to reset. Widths persist per view.</li>
+      <li><b>Multiselect release (v0.17):</b> <b>every set-type dropdown filter is now a checkbox multiselect</b> (network location + type, logon user/source/result, process suspicion, events kind - one shared component, counts per value, clear link, active filters highlight the button). Users gains an <b>Enabled column + enabled-only filter</b> (interactive shell AND usable password or SSH keys; "?" when shadow wasn't collected) and a <b>By group view</b> (every group with GID + member accounts; click a group for the full list; per-user memberships stay in the account detail pane). "Boots" renamed <b>Boot history</b>; Network addresses gains a <b>Link UP/DOWN</b> column; <b>Recent package installs</b> gains a suspicious-only filter; every tab button now carries a tooltip; <b>Copy for case notes</b> covers the Users/Apache/Audit/group views too.</li>
       <li><b>Filters &amp; polish release (v0.16):</b> the Users account filter became a proper <b>multiselect dropdown</b> (checkbox panel); Processes gained a <b>suspicion-category filter</b> (by scoring tag, with counts, works in tree view too); Network gained a <b>Type column + filter</b> (SSH/HTTP/SMB/RDP/... derived from well-known ports) and <b>click-to-VirusTotal</b> on public remote IPs (launches your browser). "Capture overview" is now <b>System overview</b>, with a <b>Network addresses</b> sub-table (friendly adaptor labels: Ethernet / Wi-Fi / Docker bridge / VPN-tunnel...), an explicit <b>Host time zone</b> row, and a <b>host-TZ toggle on every surface that shows times</b> (Overview incl. boots, Persistence, Apps, Users) - all toggles stay in sync. Package-install and boot times now display <b>normalized UTC</b> (raw host-local strings in the tooltip) instead of raw log text. Apps tab: <b>Docker containers</b> renamed and moved to the top; Persistence tab: <b>config inventory first</b>, findings gain a <b>min-score filter</b> (down to "all incl. benign", capped at 2,000 rows). The filtered-report prompt covers the new filters.</li>
       <li><b>Context release (v0.15):</b> the Overview now answers "which box is this and what can the capture speak to": a <b>network identity</b> block (interface IPs + MACs from <code>ip addr</code>/<code>ifconfig</code>), an <b>observable-activity window</b> (earliest→latest plausible timestamp across all datasets - what <code>/from /to</code> can usefully cover), <b>top external IPs</b> (most connections + logons + web requests, geo-tagged), an <b>analysis-performance</b> row (extract + parse durations, failed parser steps), and the <b>cloud-init provisioning baseline</b> (moved from Logs). Logons hides <b>lastlog state rows</b> by default (they're per-account state, shown on Users; a toolbar tick mixes them back in, hidden count disclosed). An empty Processes tab on a logs-only capture now points at Logs → Service inventory as the nearest substitute. The report gains identity / activity / top-talkers / cloud-init context.</li>
       <li><b>Refinement release (v0.14):</b> <b>Lateral movement</b> now lives on the Logons tab (above the logon table - it's the outbound half of the auth story; the Overview stat card jumps there), and the <b>Boots</b> table moved from Logs to the Overview. Tab order: Apps and Users sit left of Logons. <b>Web logs is renamed Apache logs</b> (still parses apache2/nginx/httpd combined format). Network gains a <b>Location column</b> (country + ASN, right of Remote) and a <b>location dropdown filter</b>; Events gains a <b>notable-events</b> filter (OOM / promisc / USB / modules / hosts pins / boots / journal anomalies); Users gains a <b>multiselect account filter</b>. <b>Generate report</b> now detects active UI filters and asks whether to write a <b>FILTERED report</b> (mirroring exactly what's on screen, clearly labelled, <code>_filtered</code> filename suffix) or the full one. Run metadata gains <b>Distribution</b> (/etc/os-release) and <b>Kernel</b> (uname). The processing-time pill moved next to the Instructions button.</li>
