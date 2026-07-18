@@ -1,8 +1,10 @@
-# UAC Triage Tool
+# Linux UAC Capture Analyzer
 
-A single-file Windows **HTA** that triages the output of [**UAC** (Unix-like Artifacts Collector)](https://github.com/tclahr/uac) — the tarball a responder collects from a Linux, macOS, \*BSD, Solaris or ESXi host. Point it at the `uac-<host>-<os>-<timestamp>.tar.gz` (or an already-extracted folder); it extracts the archive with Windows' built-in `tar.exe` and turns the plain-text process, network, logon and filesystem-timeline artifacts into scored, searchable triage views.
+A single-file Windows **HTA** that analyzes the output of [**UAC** (Unix-like Artifacts Collector)](https://github.com/tclahr/uac) — the tarball a responder collects from a Linux host. Point it at the `uac-<host>-<os>-<timestamp>.tar.gz` (or an already-extracted folder); it extracts the archive with Windows' built-in `tar.exe` and turns the plain-text process, network, logon, log and filesystem-timeline artifacts into scored, searchable triage views — plus a self-contained HTML report.
 
 **It never runs UAC and never touches the target host.** There is no SSH, no remote anything, and no parser engine to install — the tarball is the entire interface.
+
+The "**Linux**" in the name is honest scoping: several parsers (binary `wtmp`/`btmp`/`lastlog` decode, `/proc`-based process analytics, systemd/journald artifacts) are Linux-specific. Captures from the other platforms UAC supports (macOS, \*BSD, Solaris, ESXi) still open, degrade gracefully to their text sources, and say so in the integrity notes.
 
 ![Overview tab](screenshots/overview.png)
 
@@ -10,52 +12,64 @@ A single-file Windows **HTA** that triages the output of [**UAC** (Unix-like Art
 
 ## Why
 
-UAC is excellent at *collecting* a Unix-like host. This tool is about *reading the result fast on a Windows analysis box* — surfacing the handful of rows that matter (a hidden process, a brute-forced login, a malicious cron job) out of a capture with tens of thousands of files, and doing it with no dependencies beyond the copy of `tar.exe` already on every modern Windows machine.
+UAC is excellent at *collecting* a Unix-like host. This tool is about *reading the result fast on a Windows analysis box* — surfacing the handful of rows that matter (a hidden process, a brute-forced login, a malicious cron job, a web-shell plant) out of a capture with tens of thousands of files, and doing it with no dependencies beyond the copy of `tar.exe` already on every modern Windows machine.
 
 ## Quick start
 
-1. **On the \*nix host**, download UAC from [its releases](https://github.com/tclahr/uac/releases) and run it from its own folder:
+1. **On the Linux host**, download UAC from [its releases](https://github.com/tclahr/uac/releases) and run it from its own folder:
    ```
    cd uac-3.3.0
    ./uac -p ir_triage /tmp
    ```
 2. **Copy** the resulting `uac-<host>-<os>-<ts>.tar.gz` to a Windows box.
-3. **Open** `UAC-Triage-Tool.hta`, drop the tarball path in (or **Browse…**), confirm the target hostname, and click **Analyze capture**.
-4. **Read Overview first**, then work the tabs. Anything scored **≥ 3** is flagged suspicious.
+3. **Open** `Linux-UAC-Analyzer.hta`, drop the tarball path in (or **Browse…**), confirm the target hostname, and click **Analyze capture**.
+4. **Read Overview first**, then work the tabs. Anything scored **≥ 3** is flagged suspicious. **Generate report** writes the whole triage to one shareable HTML file.
 
 ## What it shows
 
-Nine tabs:
+Fifteen tabs:
 
 | Tab | Built from | Highlights |
 |---|---|---|
-| **Overview** | `uac.log`, `uptime`, `date` | Run metadata incl. **boot time / uptime**, per-dataset stat cards, cross-dataset **Top findings**, scored **Persistence & system findings** (cron, systemd units **and timers**, accounts, suid/caps/hidden sweeps, **null-passphrase SSH keys**, shell histories), package activity (with attribution), **deep-inspected containers** (privileged / sensitive mounts / docker diff), integrity/journal-gap summaries, and a presence inventory |
-| **Processes** | `ps -ef` + `/proc` + **`top`** + **`lsof`** + **tree** | **Name** column + collapsible **Tree view**; hidden-from-ps processes **synthesized**; deleted-binary detection; **%CPU/%MEM**; processes **only top saw**; **LD_PRELOAD / memfd / deleted-fd / comm-masquerade**; **ancestry + children** in detail; **web-shell** detection (interpreter parented by a web/DB server) |
-| **Network** | `ss` / `netstat` + **`/proc/net`** + `lsof` | External connections; socket-to-process links; **hidden-socket cross-check** (in /proc/net but missing from ss); ownership **recovered on non-root captures** via uid + fd inodes |
-| **Logons** | `auth.log` (**ISO-8601 + classic syslog**), **wtmp/btmp/lastlog binaries**, `last`, `lastb` | SSH accepted/failed, **sudo / pkexec / pam sessions / account changes / su**, per-account lastlog, spray + **BRUTEWIN** detection, service-account-login and new-login-account flags; **User/Source/Result filters** + clickable links to the raw source log |
-| **Timeline** | TSK bodyfile | Full filesystem MAC-times; case-window filterable; capped for MFT-scale captures |
-| **Events** | **all time-stamped datasets** | One time-sorted, scored, case-window-filterable axis merging logons, package activity, boots, journal gaps & content, audit/AppArmor and timestamped history — the "what happened around \<time\>" view |
-| **Logs** | journal, syslog, kern.log, sysstat, cloud-init, `journalctl`, auditd | **Journal coverage + gap/generation-change detection**, **boots table** (`journalctl --list-boots`), optional **journal contents via WSL** (`journalctl -o json`), **log-integrity** checks, **syslog service inventory**, notable events (OOM, promiscuous, USB, taint, timers/units, **AppArmor/SELinux denials**), **sar** CPU summary, **cloud-init** baseline |
-| **IOC hits** | tree sweep + `hash_executables` | Line-scan of the whole tree, **plus** SHA1 matches against on-disk (dormant) executables |
-| **Inventory** | ~55 key artifacts | Present/absent map across categories, each with an "open folder" link to the raw file |
+| **Overview** | `uac.log`, `os-release`, `uname`, `ip addr`, sar, cloud-init, `--list-boots` | System overview (distribution, kernel, host TZ), **network addresses** with friendly adaptor labels + link state, **observable-activity window**, **top external IPs** (geo-tagged), sar CPU summary, **boot history**, cloud-init baseline, dataset stat cards, cross-dataset **Top findings**, possible-ATT&CK mappings, **Generate report** |
+| **Inventory** | ~60 key artifacts | Present/absent map with open-folder links to every raw file |
+| **Processes** | `ps` + `/proc` + `top` + `lsof` | Tree view, hidden-from-ps synthesis, deleted binaries, LD_PRELOAD/memfd/deleted-fd, web-shell parentage, **suspicion-category filter** |
+| **Network** | `ss` + `/proc/net` hex-decode | **Type column** (SSH/HTTP/SMB/RDP/… from ports), **Location column** (geo/ASN), public-IPs-only + multiselect filters, hidden-socket cross-check, **click a public IP → VirusTotal** |
+| **Apps** | apt/dpkg history, `docker ps`/inspect/diff | **Docker containers** (privileged / host-ns / sensitive mounts / implants) and package installs with attribution + suspicious-only filter |
+| **Users** | passwd, group, shadow, lastlog, homes | Per-account view with **Enabled** verdict, SSH-key and history counts, multiselect account filter, **By group** view |
+| **Logons** | auth.log (ISO + classic syslog), wtmp/btmp/lastlog, last/lastb | **Lateral movement panel** (known_hosts + ssh config + typed commands), **By source IP** aggregation, spray/brute-then-success detection, multiselect filters |
+| **Persistence** | 20+ mechanisms | Config inventory + scored command lines: cron, systemd units/timers (system+user), authorized_keys, rc.local, ld.so.preload, motd & APT hooks, modprobe, XDG autostart, shell startup files, **PAM module dirs** |
+| **Timeline** | TSK bodyfile | Full MAC-times, case-window filterable, **pivot ±15 min** target from any event |
+| **Events** | all time-stamped datasets | One scored axis: logons, packages, boots, journal anomalies, web, audit, history; notable-events filter; click a timestamp to pivot the Timeline |
+| **Apache logs** | apache2/nginx/httpd access logs | Initial-access hunting: POSTs to scripts, traversal/encoded payloads, tool user-agents |
+| **Audit** | auditd | `execve` records (hex args decoded, auid attribution) + login events — the closest Linux gets to process-creation telemetry |
+| **Browser** | user-profile SQLite DBs | Hand-off to the SQLECmd wrapper (Zimmerman maps parse Linux-collected Chrome/Firefox DBs unchanged) |
+| **Logs** | journal filenames, syslog, kern.log, auditd summary | Log-integrity checks, journal rotation analysis, service inventory, notable events, optional **journal contents via WSL** |
+| **IOC hits** | tree sweep + `hash_executables` | Line-scan of the whole tree plus SHA1 matches against dormant on-disk executables |
 
-Every finding is tagged with its **MITRE ATT&CK technique** (shown in the detail pane), and the Overview lists the distinct techniques observed. **Config drift** — risky `sshd_config` directives and `pam.d` weaknesses (nullok, `pam_exec`, always-succeed `pam_permit`) — scores into the persistence findings.
-
-Rotated **`.gz` logs** under `[root]/var/log` are inflated at parse time, so weeks of rotated auth/syslog/dpkg/apt history are included automatically — usually where a logs-only capture's real activity lives.
+Optional **online geo/ASN enrichment** (checkbox, default on) tags public IPs with country + ASN across all views — only the bare IP list leaves the machine, and an `offline.txt` beside the app disables every outbound feature. Findings carry **possible MITRE ATT&CK technique mappings** (heuristic candidates, not confirmed behaviour). Rotated **`.gz` logs** are inflated automatically (into a per-run cache when the input is an extracted evidence folder — source evidence is never modified).
 
 ![Logons tab — a brute-force that succeeded](screenshots/logon.png)
 
 ## Scoring
 
-Rows are scored with additive rules; **≥ 3 is suspicious**. Highlights: IOC / SHA1 hit (+3), executable under a temp/ram path (+2), interactive/decoder shell one-liner (+2), running binary deleted from disk (+3), PID hidden from ps (+3), **LD_PRELOAD in a process environment** (+3), **unrecognized memfd** fileless descriptor (+3), **hidden LISTEN socket** (in /proc/net, missing from ss, +3), service account running an interpreter seen only in top (+3), **brute-force-then-success** (+3), service account with an interactive login (+3), new account with a login shell (+4), **extra UID-0 account** (+3), privileged container / docker.sock mount (+3), a populated `ld.so.preload` (+3), null-passphrase SSH private key (+2), anti-forensics history commands (+2), a **journal gap with a generation change** (integrity, high sev), suspicious package installs (nmap/socat/xmrig/…), and more. Desktop-runtime noise (GNOME memfds, X11 lock files, upgraded-library deleted maps, renamed threads) is explicitly tuned out — verified against a real non-root ir_triage capture. Full reference in the manual.
+Rows are scored with additive rules; **≥ 3 is suspicious**. Highlights: IOC / SHA1 hit (+3), executable under a temp/ram path (+2), interactive/decoder shell one-liner (+2), running binary deleted from disk (+3), PID hidden from ps (+3), LD_PRELOAD in a process environment (+3), unrecognized memfd fileless descriptor (+3), hidden LISTEN socket (+3), brute-force-then-success (+3), service account with an interactive login (+3), new account with a login shell (+4), extra UID-0 account (+3), privileged container / docker.sock mount (+3), populated `ld.so.preload` (+3), non-`pam_*` shared object in a PAM directory (+3), null-passphrase SSH private key (+2), anti-forensics history commands (+2). Dual-use tooling installs (nmap, tcpdump, …) are tagged **TOOLING** — context, never counted as IOC. Desktop-runtime noise is explicitly tuned out. Full reference in the manual.
 
 ## Command line
 
 ```
-mshta "UAC-Triage-Tool.hta" "<archiveOrFolder>" ["<outDir>"] [/auto] [/from:yyyy-MM-dd] [/to:yyyy-MM-dd]
+mshta "Linux-UAC-Analyzer.hta" "<archiveOrFolder>" ["<outDir>"] [/auto] [/from:yyyy-MM-dd] [/to:yyyy-MM-dd]
 ```
 
 `/auto` extracts and parses immediately; `/from` `/to` set a UTC case window (filters the timeline, logons and package activity — **never** affects scoring). A shared `IOC.txt` next to the app is auto-merged at launch.
+
+## Evidence hygiene & provenance
+
+- Extracted-**folder** input is treated as read-only evidence; generated files (gz cache, runinfo, exports, reports, run logs) land in the output directory only.
+- Host-local timestamps (classic syslog, `last -F`, boot tables, apt/dpkg) are normalized to **UTC at ingest** using the collector's offset; a host-TZ toggle re-renders everywhere at once.
+- A **hostname-mismatch gate** stops analysis if `uac.log` disagrees with the typed target host.
+- `runinfo.json` records run id, app + UAC versions, collection profile, TZ offset, per-step parse timings; a full run log (`parse_log_*.txt`) is written beside it after every run.
+- CSV exports neutralize formula-injection cells; binary utmp decode is gated to Linux glibc x86-64 with per-record plausibility checks.
 
 ## Full manual
 
@@ -65,10 +79,9 @@ See **[`UAC-Triage-Manual.html`](UAC-Triage-Manual.html)** — a self-contained 
 
 - Windows' `tar.exe` (bsdtar) **returns exit code 1** on UAC tarballs because they contain Unix symlinks Windows can't create — this is expected; success is judged by `uac.log` appearing, and the regular files all extract.
 - Encrypted zips (UAC `-P`) can't be opened by bsdtar — extract with 7-Zip first and use **Pick folder…**.
-- Displayed times are **UTC** by default; a **host-TZ toggle** (Logons, Timeline, Logs) re-renders them in the collector's local time using the offset recorded in `uac.log`.
-- **Non-root captures** are first-class: the Overview states what's missing (shadow, sudoers, other users' /proc details), permission-denied caveats are summarized (capped, not spammed), and socket ownership lost from `ss` is recovered from `/proc/net` + fd inodes.
-- **Long paths** are handled: UAC captures nest ~170 chars deep, so a deep output directory can push files past Windows' 260-char limit. The tool warns before extracting into a too-deep directory, audits the extracted tree (via robocopy, which is long-path capable) and reports any unreadable files, and computes journal coverage from filenames so it survives regardless. Keep the **Output directory short** (e.g. `C:\Cases\<host>`) to include every file.
-- Rotated-log inflation and the sar/journal parsers use **PowerShell** (already present on Windows 10+) for `.gz` decompression; if PowerShell is unavailable, rotated history simply stays compressed and everything else still works.
+- **Non-root captures** are first-class: the Overview states what's missing (shadow, sudoers, other users' /proc details), permission-denied caveats are summarized, and socket ownership lost from `ss` is recovered from `/proc/net` + fd inodes.
+- **Long paths** are handled: the tool warns before extracting into a too-deep directory, audits the extracted tree via robocopy, and reports any unreadable files. Keep the **Output directory short** (e.g. `C:\Cases\<host>`).
+- Upgrading from **UAC Triage Tool** (≤ v0.9.x): the self-update replaces the file in place under its old name — everything keeps working, and the sidecar files (`UAC-Triage-Tool.sqlecmd.txt`, `.colw.txt`) and `_Processed\<host>\UAC` output convention are intentionally unchanged.
 
 ## Requirements
 
@@ -76,4 +89,4 @@ Windows 10 1803+ (for the bundled `tar.exe`). No install, no admin required for 
 
 ## License
 
-MIT © 2026 Ben Morris. UAC is a project of Thiago Canozzo Lahr ([tclahr/uac](https://github.com/tclahr/uac)); this is an independent triage viewer for its output.
+MIT © 2026 Ben Morris. UAC is a project of Thiago Canozzo Lahr ([tclahr/uac](https://github.com/tclahr/uac)); this is an independent analyzer for its output.

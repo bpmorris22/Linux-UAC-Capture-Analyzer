@@ -3,10 +3,10 @@
 <head>
 <meta http-equiv="x-ua-compatible" content="IE=edge">
 <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
-<title>UAC Triage Tool</title>
+<title>Linux UAC Capture Analyzer</title>
 <HTA:APPLICATION
   ID="uacHta"
-  APPLICATIONNAME="UAC Triage Tool"
+  APPLICATIONNAME="Linux UAC Capture Analyzer"
   BORDER="thick"
   CAPTION="yes"
   SCROLL="auto"
@@ -141,7 +141,7 @@
 </head>
 <body>
 <header>
-  <h1>UAC Triage Tool <small>- Unix-like Artifacts Collector triage <span id="appver"></span></small></h1>
+  <h1>Linux UAC Capture Analyzer <small>- Unix-like Artifacts Collector triage <span id="appver"></span></small></h1>
   <span class="pill" id="verpill">tar: checking&hellip;</span>
   <span class="pill" id="srcpill">no capture loaded</span>
   <span class="pill clk hide" id="profpill" onclick="openProfModal()" title="Collection profile detected from uac.log's command line - click for coverage details"></span>
@@ -396,7 +396,7 @@
 <script language="JScript">
 "use strict";
 
-var APP_VERSION = "0.17.1";
+var APP_VERSION = "1.0.0";
 /* v0.9.4 - SQLECmd wrapper: offer to DOWNLOAD instead of hunt for it (operator request):
    - if the wrapper isn't found anywhere, a hand-off now offers to download the latest
      SQLECmd-Wrapper.hta from GitHub into THIS app's folder (browse stays as the offline
@@ -860,7 +860,7 @@ function saveRunLog(){
     var el=$("log"); var txt=el?(el.innerText!=null?el.innerText:(el.textContent||"")):"";
     if(!trimStr(txt)) return;
     var p=String(LASTOUTDIR).replace(/[\\\/]+$/,"")+"\\parse_log_"+nowStamp()+".txt";
-    writeUtf8(p, "UAC Triage Tool v"+APP_VERSION+" run log\r\nwritten: "+new Date()+"\r\n\r\n"+txt);
+    writeUtf8(p, "Linux UAC Capture Analyzer v"+APP_VERSION+" run log\r\nwritten: "+new Date()+"\r\n\r\n"+txt);
     appendLog("Run log written: "+p, true);
   }catch(e){}
 }
@@ -4167,7 +4167,7 @@ function checkSqleLatest(){
   try{
     var x=new ActiveXObject("MSXML2.XMLHTTP.6.0");
     x.open("GET","https://api.github.com/repos/"+SQLE_REPO+"/releases/latest",true);
-    try{ x.setRequestHeader("User-Agent","UAC-Triage-Tool"); }catch(eh){}
+    try{ x.setRequestHeader("User-Agent","Linux-UAC-Analyzer"); }catch(eh){}
     x.onreadystatechange=function(){ if(x.readyState!==4) return;
       try{ if(x.status!==200) return; var t=x.responseText+"";
         var m=t.match(/"tag_name"\s*:\s*"v?([0-9.]+)"/i); if(m) SQLE_LATEST=m[1];
@@ -4257,7 +4257,7 @@ function downloadSqleWrapper(i){
   var ps1=tmp+"\\sqledl_"+uid()+".ps1";
   var dq=String(destFile).replace(/'/g,"''");
   var L=["$ErrorActionPreference='Stop'","[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12",
-    "$h=@{ 'User-Agent'='UAC-Triage-Tool' }",
+    "$h=@{ 'User-Agent'='Linux-UAC-Analyzer' }",
     "$j=(Invoke-WebRequest -UseBasicParsing -Uri 'https://api.github.com/repos/"+SQLE_REPO+"/releases/latest' -Headers $h).Content | ConvertFrom-Json",
     "$a=$j.assets | Where-Object { $_.name -like '*.hta' } | Select-Object -First 1",
     "if(-not $a){ throw 'no .hta asset in the latest release' }",
@@ -5079,7 +5079,7 @@ function applyIocs(){
 }
 
 /* ---------- command-line invocation (family) ----------
-   mshta.exe "UAC-Triage-Tool.hta" "<archiveOrFolder>" ["<outDir>"] [/auto] [/from:yyyy-MM-dd] [/to:yyyy-MM-dd] */
+   mshta.exe "Linux-UAC-Analyzer.hta" "<archiveOrFolder>" ["<outDir>"] [/auto] [/from:yyyy-MM-dd] [/to:yyyy-MM-dd] */
 function getCommandLine(){
   try{ var cl=uacHta.commandLine+""; if(cl && cl!=="undefined") return cl; }catch(e){}
   try{
@@ -5144,7 +5144,7 @@ function dayNum(s){ if(!s) return 0; var m=String(s).match(/(\d{4})-(\d{1,2})-(\
   function p(x){ x=String(x); return x.length<2?("0"+x):x; } return Number(m[1]+p(m[2])+p(m[3])); }
 
 /* ---------- self-update (family) ---------- */
-var SELF_REPO="bpmorris22/UAC-Triage-Tool", SELF_HTA="UAC-Triage-Tool.hta", SELF_LATEST="", SELF_ASSET_URL="";
+var SELF_REPO="bpmorris22/Linux-UAC-Capture-Analyzer", SELF_HTA="Linux-UAC-Analyzer.hta", SELF_LATEST="", SELF_ASSET_URL="";
 function selfVerNewer(r,l){ var a=String(r).split("."),b=String(l).split("."),n=Math.max(a.length,b.length);
   for(var i=0;i<n;i++){ var x=parseInt(a[i],10)||0,y=parseInt(b[i],10)||0; if(x!==y) return x>y; } return false; }
 function selfPath(){ try{ var p=decodeURIComponent(location.pathname+"").replace(/^\//,"").replace(/\//g,"\\");
@@ -5197,12 +5197,12 @@ function doSelfUpdate(){
 }
 
 /* ---------- help ---------- */
-var GITHUB="https://github.com/bpmorris22/UAC-Triage-Tool";
+var GITHUB="https://github.com/bpmorris22/Linux-UAC-Capture-Analyzer";
 function openUrl(u){ try{ new ActiveXObject("WScript.Shell").Run('"'+u+'"',1,false); }catch(e){ setStatus("Could not open browser: "+e.message,"err"); } }
 function openHelp(){ try{ $("helpVer").innerHTML="v"+APP_VERSION; }catch(e){} showEl("helpModal",true); }
 function closeHelp(){ showEl("helpModal",false); }
 /* ---------- field guide (Instructions) ---------- */
-var MANUAL_URL="https://raw.githubusercontent.com/bpmorris22/UAC-Triage-Tool/main/UAC-Triage-Manual.html";
+var MANUAL_URL="https://raw.githubusercontent.com/bpmorris22/Linux-UAC-Capture-Analyzer/main/UAC-Triage-Manual.html";
 var MANUAL_FILE="UAC-Triage-Manual.html";
 function openManualFile(path){ try{ new ActiveXObject("WScript.Shell").Run('explorer.exe "'+path+'"',1,false); return true; } catch(e){ setStatus("Downloaded the field guide, but could not open it: "+e.message,"err"); return false; } }
 function openInstructions(){ var fso=new ActiveXObject("Scripting.FileSystemObject"); var dest=fso.GetSpecialFolder(2)+"\\"+MANUAL_FILE;
@@ -5210,7 +5210,7 @@ function openInstructions(){ var fso=new ActiveXObject("Scripting.FileSystemObje
     else { var loc=htaFolder()?(htaFolder()+"\\"+MANUAL_FILE):""; if(loc && fileExists(loc)){ if(openManualFile(loc)) setStatus("Offline mode - opened the local field guide.","muted"); }
       else setStatus("Offline mode (offline.txt) - field-guide download disabled and no local copy found. Open UAC-Triage-Manual.html from the repo folder.","err"); }
     return; }
-  setStatus("Downloading the field guide from GitHub...","muted"); var ps1=fso.GetSpecialFolder(2)+"\\man_"+uid()+".ps1"; var dq=String(dest).replace(/'/g,"''"); var L=[]; L.push("$ErrorActionPreference='Stop'"); L.push("[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12"); L.push("Invoke-WebRequest -UseBasicParsing -Uri '"+MANUAL_URL+"' -OutFile '"+dq+"' -Headers @{ 'User-Agent'='UAC-Triage-Tool' }"); L.push("if((Get-Item '"+dq+"').Length -lt 2000){ throw 'downloaded file too small' }"); L.push("Write-Output 'MAN_OK'"); try{ var f=fso.CreateTextFile(ps1,true); f.Write(L.join("\r\n")); f.Close(); } catch(ew){ setStatus("Could not stage the field-guide download: "+ew.message,"err"); return; } var r=runBat(['powershell -NoProfile -ExecutionPolicy Bypass -File "'+ps1+'" > "__LOG__" 2>&1']); try{ fso.DeleteFile(ps1); }catch(e0){} if((r.log+"").indexOf("MAN_OK")>=0 && fileExists(dest)){ if(openManualFile(dest)) setStatus("Field guide downloaded and opened in your browser.","ok"); appendLog("Field guide: downloaded latest -> "+dest); } else { appendLog("--- field-guide download ---\n"+r.log); if(fileExists(dest)){ if(openManualFile(dest)) setStatus("Download failed (offline?) - opened the previously downloaded copy.","muted"); } else { setStatus("Field-guide download failed (offline, or the file moved). See log; or open it from the GitHub repo.","err"); } } }
+  setStatus("Downloading the field guide from GitHub...","muted"); var ps1=fso.GetSpecialFolder(2)+"\\man_"+uid()+".ps1"; var dq=String(dest).replace(/'/g,"''"); var L=[]; L.push("$ErrorActionPreference='Stop'"); L.push("[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12"); L.push("Invoke-WebRequest -UseBasicParsing -Uri '"+MANUAL_URL+"' -OutFile '"+dq+"' -Headers @{ 'User-Agent'='Linux-UAC-Analyzer' }"); L.push("if((Get-Item '"+dq+"').Length -lt 2000){ throw 'downloaded file too small' }"); L.push("Write-Output 'MAN_OK'"); try{ var f=fso.CreateTextFile(ps1,true); f.Write(L.join("\r\n")); f.Close(); } catch(ew){ setStatus("Could not stage the field-guide download: "+ew.message,"err"); return; } var r=runBat(['powershell -NoProfile -ExecutionPolicy Bypass -File "'+ps1+'" > "__LOG__" 2>&1']); try{ fso.DeleteFile(ps1); }catch(e0){} if((r.log+"").indexOf("MAN_OK")>=0 && fileExists(dest)){ if(openManualFile(dest)) setStatus("Field guide downloaded and opened in your browser.","ok"); appendLog("Field guide: downloaded latest -> "+dest); } else { appendLog("--- field-guide download ---\n"+r.log); if(fileExists(dest)){ if(openManualFile(dest)) setStatus("Download failed (offline?) - opened the previously downloaded copy.","muted"); } else { setStatus("Field-guide download failed (offline, or the file moved). See log; or open it from the GitHub repo.","err"); } } }
 function openDir(){ var d=$("outDir").value; if(!d){ setStatus("No output directory set","err"); return; }
   try{ new ActiveXObject("WScript.Shell").Run('explorer.exe "'+d+'"',1,false); }catch(e){ setStatus("Could not open folder: "+e.message,"err"); } }
 /* open the containing folder in Explorer with the file pre-selected (or just the folder for a dir) */
@@ -5332,7 +5332,7 @@ function generateReport(){
     kv("Boot time (host local)", META.bootTime); kv("Uptime", META.uptime);
     kv("Collected as", META.runAs); kv("Collection command", META.cmdLine);
     kv("Collection profile", CAPPROF?CAPPROF.label:"");
-    kv("Analyzed by", "UAC Triage Tool v"+APP_VERSION);
+    kv("Analyzed by", "Linux UAC Capture Analyzer v"+APP_VERSION);
     kv("Report generated (UTC)", (function(){ var d=new Date(); return d.getUTCFullYear()+"-"+p2n(d.getUTCMonth()+1)+"-"+p2n(d.getUTCDate())+" "+p2n(d.getUTCHours())+":"+p2n(d.getUTCMinutes())+"Z"; })());
     kv("Case window", (CASE_FROM||CASE_TO)?((CASE_FROM||"…")+" to "+(CASE_TO||"…")):"");
     // v0.15: identity + activity context
@@ -5450,9 +5450,9 @@ function generateReport(){
       +'table.kv th{width:220px;font-weight:600}'
       +'.muted{color:#8b949e;font-size:11px}.warn-t{color:#e3b341}'
       +'@media print{nav{display:none}main{margin-left:0}}';
-    var html='<!DOCTYPE html><html><head><meta charset="utf-8"><title>UAC triage report - '+esc(host)+'</title><style>'+css+'</style></head><body>'
+    var html='<!DOCTYPE html><html><head><meta charset="utf-8"><title>Linux UAC Capture Analyzer report - '+esc(host)+'</title><style>'+css+'</style></head><body>'
       +'<nav><h2>UAC report</h2>'+NAV.join("")+'</nav>'
-      +'<main><h1>UAC triage report - '+esc(host)+(useFilters?' <span style="color:#e3b341">(FILTERED)</span>':'')+'</h1>'
+      +'<main><h1>Linux UAC Capture Analyzer report - '+esc(host)+(useFilters?' <span style="color:#e3b341">(FILTERED)</span>':'')+'</h1>'
       +(useFilters?('<p class="warn-t"><b>FILTERED report</b> - only rows matching the filters active at generation time: '+esc(afl.join("; "))+'. Generate again and choose Cancel for the full report.</p>'):'')
       +'<p class="muted">Times are '+esc(tzLabel())+' unless a column says otherwise. Scores: 3-4 amber (suspicious), 5+ red (high). '
       +'Heuristic output for triage - verify findings against the raw artifacts before reporting them as fact.</p>'
@@ -5468,7 +5468,7 @@ function generateReport(){
 function init(){
   try{ window.resizeTo(1360,920); }catch(e){}
   $("appver").innerHTML="&middot; v"+APP_VERSION;
-  try{ document.title="UAC Triage Tool v"+APP_VERSION; }catch(e){}
+  try{ document.title="Linux UAC Capture Analyzer v"+APP_VERSION; }catch(e){}
   $("maxrowLbl").innerHTML=nf(MAXROWS);
   $("tblScroll").onscroll=applyFreeze;
   resolveTar(); checkTar(); loadColw();
@@ -5646,8 +5646,8 @@ window.onload=function(){ init(); try{ window.setTimeout(checkSelfUpdate,600); }
 <div id="helpModal" class="modal hide" onclick="if((event.srcElement||{}).id==='helpModal')closeHelp()">
   <div class="mcard">
     <span class="x" onclick="closeHelp()" title="Close">&times;</span>
-    <h2>UAC Triage Tool <span class="muted" style="font-size:13px;font-weight:400" id="helpVer"></span></h2>
-    <div class="gh muted">GitHub: <span class="lnk" onclick="openUrl(GITHUB)">https://github.com/bpmorris22/UAC-Triage-Tool</span></div>
+    <h2>Linux UAC Capture Analyzer <span class="muted" style="font-size:13px;font-weight:400" id="helpVer"></span></h2>
+    <div class="gh muted">GitHub: <span class="lnk" onclick="openUrl(GITHUB)">https://github.com/bpmorris22/Linux-UAC-Capture-Analyzer</span></div>
     <p>A single-file GUI for triaging <b>UAC (Unix-like Artifacts Collector)</b> output - the tarball a responder collects from a Linux / macOS / *BSD / Solaris / ESXi host. It extracts the capture with Windows' built-in <code>tar.exe</code> and turns the plain-text process, network, logon, log and filesystem-timeline artifacts into scored, searchable triage views. It never runs UAC and never touches the target - feed it the archive.</p>
     <h3>Quick start</h3>
     <ul>
@@ -5679,6 +5679,7 @@ window.onload=function(){ init(); try{ window.setTimeout(checkSelfUpdate,600); }
       <li><b>Inventory tab</b> - a map of every key artifact (processes, network, logons, accounts, persistence, system, filesystem, logs, containers) showing present/absent, size, and an <b>open folder</b> link that opens the raw file in Explorer. The Persistence &amp; config inventory on Overview has the same open-folder links; click an artifact name there to view its contents inline.</li>
       <li><b>UI (v0.7):</b> the Processes table has a <b>Name</b> column and a <b>Tree view</b> toggle (collapsible parent/child hierarchy - click ▸/▾ to fold, a row for detail). <b>Logons</b> has User / Source / Result filters and a clickable link to each raw source log. <b>Events</b> has a min-score filter and a kind filter. Long tables keep their <b>header row frozen</b> while scrolling, and <b>Persistence &amp; system findings</b> shows a date/time column.</li>
       <li><b>Resizable columns</b> everywhere - drag the right edge of any column header (it highlights on hover); double-click the edge to reset. Widths persist per view.</li>
+      <li><b>1.0 (2026-07-18):</b> the app is now the <b>Linux UAC Capture Analyzer</b> (file: <code>Linux-UAC-Analyzer.hta</code>, repo: <code>bpmorris22/Linux-UAC-Capture-Analyzer</code>) - the "Linux" in the name is honest scoping: binary utmp decode and several parsers are Linux-specific, and non-Linux captures degrade gracefully to text sources with integrity notes. Sidecar filenames (<code>UAC-Triage-Tool.sqlecmd.txt</code>/<code>.colw.txt</code>) and the <code>_Processed\&lt;host&gt;\UAC</code> output convention are unchanged for continuity. Everything from v0.10-v0.17 ships in this release.</li>
       <li><b>Multiselect release (v0.17):</b> <b>every set-type dropdown filter is now a checkbox multiselect</b> (network location + type, logon user/source/result, process suspicion, events kind - one shared component, counts per value, clear link, active filters highlight the button). Users gains an <b>Enabled column + enabled-only filter</b> (interactive shell AND usable password or SSH keys; "?" when shadow wasn't collected) and a <b>By group view</b> (every group with GID + member accounts; click a group for the full list; per-user memberships stay in the account detail pane). "Boots" renamed <b>Boot history</b>; Network addresses gains a <b>Link UP/DOWN</b> column; <b>Recent package installs</b> gains a suspicious-only filter; every tab button now carries a tooltip; <b>Copy to Clipboard</b> (renamed from "Copy for case notes" in v0.17.1) covers the Users/Apache/Audit/group views too; v0.17.1 also drops the redundant "Run metadata" heading under System overview.</li>
       <li><b>Filters &amp; polish release (v0.16):</b> the Users account filter became a proper <b>multiselect dropdown</b> (checkbox panel); Processes gained a <b>suspicion-category filter</b> (by scoring tag, with counts, works in tree view too); Network gained a <b>Type column + filter</b> (SSH/HTTP/SMB/RDP/... derived from well-known ports) and <b>click-to-VirusTotal</b> on public remote IPs (launches your browser). "Capture overview" is now <b>System overview</b>, with a <b>Network addresses</b> sub-table (friendly adaptor labels: Ethernet / Wi-Fi / Docker bridge / VPN-tunnel...), an explicit <b>Host time zone</b> row, and a <b>host-TZ toggle on every surface that shows times</b> (Overview incl. boots, Persistence, Apps, Users) - all toggles stay in sync. Package-install and boot times now display <b>normalized UTC</b> (raw host-local strings in the tooltip) instead of raw log text. Apps tab: <b>Docker containers</b> renamed and moved to the top; Persistence tab: <b>config inventory first</b>, findings gain a <b>min-score filter</b> (down to "all incl. benign", capped at 2,000 rows). The filtered-report prompt covers the new filters.</li>
       <li><b>Context release (v0.15):</b> the Overview now answers "which box is this and what can the capture speak to": a <b>network identity</b> block (interface IPs + MACs from <code>ip addr</code>/<code>ifconfig</code>), an <b>observable-activity window</b> (earliest→latest plausible timestamp across all datasets - what <code>/from /to</code> can usefully cover), <b>top external IPs</b> (most connections + logons + web requests, geo-tagged), an <b>analysis-performance</b> row (extract + parse durations, failed parser steps), and the <b>cloud-init provisioning baseline</b> (moved from Logs). Logons hides <b>lastlog state rows</b> by default (they're per-account state, shown on Users; a toolbar tick mixes them back in, hidden count disclosed). An empty Processes tab on a logs-only capture now points at Logs → Service inventory as the nearest substitute. The report gains identity / activity / top-talkers / cloud-init context.</li>
@@ -5689,7 +5690,7 @@ window.onload=function(){ init(); try{ window.setTimeout(checkSelfUpdate,600); }
       <li><b>Evidence-hygiene &amp; correctness release (v0.10):</b> host-local timestamps (classic syslog, <code>last -F</code>, boot tables, apt/dpkg logs) are normalized to UTC at ingest using the collector's offset, with Dec→Jan year-rollover handling - the host-TZ toggle is now exact for every source. Extracted-<b>folder</b> input is treated as read-only evidence: rotated <code>.gz</code> logs inflate into a per-run <code>gzcache</code> under the output directory instead of the source tree. WSL journal events reset between captures (no cross-case carry-over). A <b>hostname-mismatch gate</b> stops analysis when uac.log disagrees with the typed Target hostname. Dual-use package installs (nmap, tcpdump, …) are tagged <b>TOOLING</b> - context, no longer counted as IOC or auto-flagged. wtmp/btmp/lastlog binary decode is gated to Linux glibc x86-64 captures with per-record timestamp validation, and the host's own <code>last/lastb</code> text output is preferred when present. CSV exports neutralize formula-injection cells. Classic-syslog service inventory and hostname-consistency checks fixed (both silently failed or false-fired on <code>Jul 17 12:34:56</code>-style logs). IPv6 <code>/proc/net</code> sockets are decoded. <b>Offline mode:</b> an <code>offline.txt</code> next to the app disables every outbound network feature. <code>runinfo.json</code> gains run id, capture host, UAC version, profile and TZ offset, and <code>finishedUtc</code> is now really UTC.</li>
     </ul>
     <h3>Command line</h3>
-    <p><code>mshta "UAC-Triage-Tool.hta" "&lt;archiveOrFolder&gt;" ["&lt;outDir&gt;"] [/auto] [/from:yyyy-MM-dd] [/to:yyyy-MM-dd]</code></p>
+    <p><code>mshta "Linux-UAC-Analyzer.hta" "&lt;archiveOrFolder&gt;" ["&lt;outDir&gt;"] [/auto] [/from:yyyy-MM-dd] [/to:yyyy-MM-dd]</code></p>
     <ul>
       <li><code>/auto</code> - extract + parse immediately. <code>&lt;outDir&gt;</code> - where extraction + runinfo land (optional).</li>
       <li><code>/from /to</code> - case window (UTC): prefilters the <b>timeline</b> (mtime/ctime/crtime), <b>logons</b> and <b>package installs</b>, and is recorded in runinfo; never affects scoring.</li>
