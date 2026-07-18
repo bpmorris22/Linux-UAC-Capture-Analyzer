@@ -230,7 +230,7 @@
         <button class="btn" id="tabSecurity" data-tab="security" title="Automated security assessment: cross-dataset attack-chain correlations (brute-force success, download-chmod-exec, anti-forensics, persistence-after-intrusion) + CIS/NIST-inspired OS Hardening Posture (sshd/PAM/sudoers/accounts/firewall state &amp; rules/non-standard listeners/MAC/sysctls/mounts/NTP/patching) + Apache Hardening Posture, each scored PASS / WARN / FAIL / N-A (v1.6)">Security</button>
         <button class="btn" id="tabProc" data-tab="proc" title="Running processes (ps + top + per-pid /proc + lsof), scored; flat table or collapsible tree">Processes</button>
         <button class="btn" id="tabNet" data-tab="net" title="Sockets from ss + /proc/net hex-decode cross-check, scored; geo/ASN, service types, VirusTotal links">Network</button>
-        <button class="btn" id="tabApps" data-tab="apps" title="Recent package installs + containers (v0.13)">Apps</button>
+        <button class="btn" id="tabApps" data-tab="apps" title="Recent package installs (v0.13; containers moved to their own tab in v1.9)">Apps</button>
         <button class="btn" id="tabUsers" data-tab="users" title="Per-account view: shell, groups, lock state, SSH keys, last login (v0.11)">Users</button>
         <button class="btn" id="tabBrowser" data-tab="browser" title="Browser SQLite databases + the SQLECmd hand-off (v0.13)">Browser</button>
         <button class="btn" id="tabLogon" data-tab="logon" title="Authentication events (auth.log, wtmp/btmp, last/lastb) + lateral movement + by-source-IP aggregation">Logons</button>
@@ -239,6 +239,7 @@
         <button class="btn" id="tabActions" data-tab="actions" title="Executed shell commands from per-user bash/zsh/sh history, timestamped where HISTTIMEFORMAT/zsh extended-history is set, scored (v1.2)">Actions</button>
         <button class="btn" id="tabEvents" data-tab="events" title="One time-sorted axis merging logons, packages, boots, journal anomalies, web, audit and history events; click a timestamp to pivot the Timeline">Events</button>
         <button class="btn" id="tabTime" data-tab="time" title="Filesystem timeline from the bodyfile (mtime/atime/ctime/crtime), scored; the pivot ±15 min target">Timeline</button>
+        <button class="btn" id="tabCtr" data-tab="ctr" title="Container evidence contained in this UAC capture: collection coverage, docker/podman runtime metadata, container inventory (incl. stopped), per-container inspect deep-dive (lifecycle / execution / isolation / mounts / network), docker diff filesystem changes, and cross-UAC correlations (v1.9)">Containers</button>
         <button class="btn" id="tabWeb" data-tab="web" title="Apache configuration summary (key directives from /etc/apache2 | /etc/httpd) + web-server access logs (apache/nginx/httpd combined format) - initial-access hunting">Apache Web Server</button>
         <button class="btn" id="tabAudit" data-tab="audit" title="auditd execve + login records when audit.log is in the capture (v0.11)">Audit</button>
         <button class="btn" id="tabIoc" data-tab="ioc" title="Tree-wide IOC/keyword sweep hits + dormant SHA1 matches from hash_executables">IOC hits</button>
@@ -316,14 +317,10 @@
       <div id="persNone" class="ok hide" style="font-size:12px;margin-bottom:8px">No persistence command lines at this score threshold (benign entries are parsed but hidden - try "all" above).</div>
     </div>
 
-    <!-- APPS (v0.13: own tab; v0.16: Docker containers first, stacked full-width) -->
+    <!-- APPS (v0.13: own tab; v1.9: the container table moved to the dedicated Containers tab) -->
     <div class="card hide" id="appsCard">
       <label style="font-size:12px;float:right" title="Render times in the collector's host time zone instead of UTC."><input type="checkbox" id="tzApps"> Host TZ</label>
-      <div id="ctrWrap">
-        <h3>Docker containers <span class="muted" style="font-weight:400;text-transform:none">- Running containers (docker/podman), deep-inspected: privileged / host namespaces / sensitive mounts / docker diff implants</span></h3>
-        <div class="scroll" style="max-height:30vh"><table id="ctrTbl"></table></div>
-      </div>
-      <div id="pkgWrap" style="margin-top:14px">
+      <div id="pkgWrap">
         <div class="row" style="margin-bottom:6px">
           <h3 style="display:inline;margin:0 12px 0 0">Recent package installs <span class="muted" style="font-weight:400;text-transform:none" id="pkgWinLbl"></span></h3>
           <span class="mdwrap" data-udrop="1"><button class="btn" id="pkgActBtn" data-udrop="1" onclick="mdToggleBtn('pkgAct')" title="Filter package rows by action (install / upgrade / remove / purge / downgrade / reinstall)">Action: all &#9662;</button><div id="pkgActPanel" class="hide mdpanel" data-udrop="1"></div></span>
@@ -332,7 +329,39 @@
         </div>
         <div class="scroll" style="max-height:38vh"><table id="pkgTbl"></table></div>
       </div>
-      <div id="appsNone" class="muted hide" style="font-size:12px">No package-manager activity logs and no container runtimes in this capture.</div>
+      <div id="appsNone" class="muted hide" style="font-size:12px">No package-manager activity logs in this capture. Container evidence, when collected, lives on the Containers tab.</div>
+    </div>
+
+    <!-- CONTAINERS (v1.9: own tab - the container evidence UAC actually captured. Coverage first
+         (evidence varies by profile and permissions), then runtime metadata, the inventory incl.
+         stopped containers, a per-container inspect deep-dive, docker diff changes and cross-UAC
+         correlations. Everything is POINT-IN-TIME state - never presented as Docker event history. -->
+    <div class="card hide" id="ctrCard">
+      <span style="float:right">
+        <label style="font-size:12px;margin-right:10px" title="Render times in the collector's host time zone instead of UTC (applies everywhere)."><input type="checkbox" id="tzCtr"> Host TZ</label>
+        <button class="btn violet" id="ctrExport" title="Export the coverage map, runtime metadata, container inventory (with lifecycle + findings) and filesystem changes to CSV.">Export &rarr; CSV</button>
+      </span>
+      <div class="tblhead">Containers<span class="d">Container evidence contained in this UAC capture - docker / podman / LXD point-in-time state from live_response/containers. Inspect-derived lifecycle state, not Docker event history; the coverage map below states exactly what was and was not collected.</span></div>
+      <h3>Collection coverage <span class="muted" style="font-weight:400;text-transform:none">- container evidence varies by UAC profile and collection permissions; absent is not the same as clean</span></h3>
+      <div class="scroll" style="max-height:30vh"><table id="ctrCovTbl"></table></div>
+      <div id="ctrRtWrap" class="hide">
+        <h3 style="margin-top:14px">Runtime metadata <span class="muted" style="font-weight:400;text-transform:none">- versions, storage/logging/cgroup drivers, security options, registries, proxies and counts from docker/podman info</span></h3>
+        <div class="scroll" style="max-height:34vh"><table id="ctrRtTbl"></table></div>
+      </div>
+      <div id="ctrInvWrap" class="hide">
+        <h3 style="margin-top:14px">Container inventory <span class="muted" style="font-weight:400;text-transform:none">- stopped containers stay visible (failed malware execution or terminated attacker tooling look exactly like this); click a row for the inspect deep-dive</span></h3>
+        <div class="scroll" style="max-height:38vh"><table id="ctrInvTbl"></table></div>
+      </div>
+      <div id="ctrSelWrap" class="hide" style="margin-top:14px">
+        <h3>Inspect deep-dive: <span id="ctrSelName" class="mono"></span> <span class="lnk" id="ctrSelClose" style="float:right">close &times;</span></h3>
+        <div class="row" style="margin-bottom:4px">
+          <label style="font-size:12px" title="Environment VALUES are redacted by default (names always show; values that are themselves indicators - LD_PRELOAD, public IP:port, temp paths, URLs - always show). Tick to reveal every value."><input type="checkbox" id="ctrEnvShow"> Show env values</label>
+          <label style="font-size:12px;margin-left:12px" title="Show only docker-diff paths that scored (persistence / credential / temp / hidden / web-root / anti-forensics locations)."><input type="checkbox" id="ctrDiffSus"> Suspicious diff paths only</label>
+        </div>
+        <div id="ctrSelBody"></div>
+      </div>
+      <div id="ctrNone" class="muted hide" style="font-size:12px"></div>
+      <div class="muted" style="font-size:11px;margin-top:8px">This tab shows what the capture contains and nothing more. With the current UAC artifacts it can NOT show: Docker event history, docker exec activity, destroyed containers, container stdout/stderr logs, in-container process history, the contents or hashes of docker-diff paths, volume contents, image layer/registry provenance, or complete per-namespace network state. Timestamps fed to the Events axis are labelled inspect-derived state, not Docker events.</div>
     </div>
 
     <!-- BROWSER (v0.13: own tab - was a section on the Overview) -->
@@ -476,7 +505,42 @@
 <script language="JScript">
 "use strict";
 
-var APP_VERSION = "1.8.0";
+var APP_VERSION = "1.9.0";
+/* v1.9.0 - Containers tab (external ChatGPT review drove the design; scoped to what the UAC
+   capture actually holds - point-in-time state, never presented as Docker event history):
+   - new Containers tab (left of Apache Web Server); the container table moved off Apps.
+   - COVERAGE MAP first: per-evidence status distinguishing present / partial / permission denied /
+     command failed / runtime not installed / not collected by the profile - absence of evidence is
+     surfaced, never silently blank.
+   - RUNTIME METADATA from docker/podman info+version (versions, storage/logging/cgroup drivers,
+     security options, root dir, registries/mirrors/proxies, swarm, counts) with runtime-level
+     findings: non-loopback insecure registries, non-standard root dir, missing AppArmor/SELinux/
+     seccomp support, active swarm, egress proxy, registry mirrors.
+   - INVENTORY incl. STOPPED containers (failed malware execution / terminated tooling), parsed by
+     header-offset slicing (the old 2+-space split mangled "3 months ago" columns); podman parsed
+     with the same code; LXD instance/version/warning tables summarized.
+   - per-container INSPECT deep-dive: lifecycle (created/started/finished pivot the Timeline and
+     join the Events axis, labelled inspect-derived), exit/OOM/restart/health state, execution
+     config (entrypoint/cmd/user/workdir/labels/compose), environment with VALUES REDACTED by
+     default (names always show; LD_PRELOAD / public-endpoint / temp-path values surface as
+     indicators), the v1.7 C2/implant lens over entrypoint+cmd+health-check, isolation & exposure
+     scoring (privileged +3, docker.sock +3, host namespaces +2, sensitive mounts +2/3, dangerous
+     CapAdd +2/3, unconfined +2, device maps +1, 0.0.0.0 binds +1, root+privileged/sock combo +2),
+     mounts (with find-in-Timeline pivots for host sources) and network (published ports cross-
+     checked against host ss listeners - labelled corroboration, not ownership proof).
+   - docker diff FILESYSTEM CHANGES: A/C/D counts, per-top-dir roll-up, scored suspicious paths
+     (credential/PAM/persistence/ld.so/SSH/web-root/temp/hidden/package-db; log deletion =
+     anti-forensics) with a suspicious-only filter - and an explicit "path+type only, contents not
+     acquired" caveat everywhere.
+   - CORRELATIONS: inspect State.Pid -> host process (flagged process escalates the container,
+     CTR-SUSPROC), docker top rows link to host PIDs, restart-policy persistence only scores on
+     already-suspicious containers, IOC terms sweep env/entrypoint/mounts/image, docker-group
+     membership unchanged. Security posture: P9 now also fails on docker.sock/CapAdd/unconfined
+     and jumps to the tab; new P9b runtime-hardening check. Report gains a Containers section
+     (coverage, runtime, inventory incl. lifecycle, findings, diff summary). CSV export.
+   - the tab states what it can NOT show: docker events/exec history, destroyed containers,
+     container logs, in-container process history, diff-path contents/hashes, volume contents,
+     image provenance, per-namespace network state. */
 /* v0.9.4 - SQLECmd wrapper: offer to DOWNLOAD instead of hunt for it (operator request):
    - if the wrapper isn't found anywhere, a hand-off now offers to download the latest
      SQLECmd-Wrapper.hta from GitHub into THIS app's folder (browse stays as the offline
@@ -621,7 +685,11 @@ var META = {};                        // run metadata from uac.log
 var PROC = [], NET = [], TIMEL = [], IOCHITS = [], PERSIST = [];
 var LOGON = [];                       // v0.2: auth/last/lastb login events
 var PKGS = [];                        // v0.2: package installs within case window
-var CONTAINERS = [];                  // v0.2: docker/podman running containers
+var CONTAINERS = [];                  // v0.2: docker/podman containers (v1.9: incl. stopped, inspect-enriched)
+var CTRX = null;                      // v1.9: containers coverage + runtime metadata + images/networks/lxc
+var CTR_SEL = -1;                     // v1.9: selected CONTAINERS index on the Containers tab
+var CTR_DIFF_SUS = false;             // v1.9: diff table - suspicious paths only
+var CTR_ENV_SHOW = false;             // v1.9: env table - reveal redacted values
 var PERSFIND = [];                    // v0.2: scored persistence deep-parse findings
 /* v0.4 datasets (Logs tab + Overview enrichment) */
 var LASTLOGIN = [];                   // lastlog binary: per-account last login
@@ -1842,8 +1910,12 @@ var INV_CATALOG=[
   {cat:"Logs",       name:"sysstat / sar",                kind:"dir",  rels:["[root]/var/log/sysstat"], desc:"Performance archives (CPU/net trend)"},
   {cat:"Logs",       name:"cloud-init",                   kind:"file", rels:["[root]/var/log/cloud-init.log","[root]/var/log/cloud-init-output.log"], desc:"Provisioning baseline (IP/MAC/keys)"},
   {cat:"Logs",       name:"kernel log",                   kind:"file", rels:["[root]/var/log/kern.log","[root]/var/log/dmesg"], desc:"USB/module/promiscuous events"},
-  {cat:"Containers", name:"Docker",                       kind:"file", rels:["live_response/containers/docker_ps.txt","live_response/containers/docker_info.txt"], desc:"docker ps / info"},
-  {cat:"Containers", name:"Podman",                       kind:"file", rels:["live_response/containers/podman_ps.txt","live_response/containers/podman_info.txt"], desc:"podman ps / info"}
+  {cat:"Containers", name:"Docker runtime info",          kind:"file", rels:["live_response/containers/docker_info.txt","live_response/containers/docker_version.txt"], desc:"docker info / version (storage, logging, security options, registries)"},
+  {cat:"Containers", name:"Docker containers",            kind:"file", rels:["live_response/containers/docker_container_ls_--all_--size.txt","live_response/containers/docker_ps_-a.txt","live_response/containers/docker_ps.txt"], desc:"Container inventory incl. stopped (per-container inspect/diff coverage: Containers tab)"},
+  {cat:"Containers", name:"Docker images/networks/volumes", kind:"file", rels:["live_response/containers/docker_image_ls_--all.txt","live_response/containers/docker_network_ls.txt","live_response/containers/docker_volume_ls.txt"], desc:"Image, network and volume listings"},
+  {cat:"Containers", name:"Podman runtime info",          kind:"file", rels:["live_response/containers/podman_info.txt","live_response/containers/podman_version.txt"], desc:"podman info / version"},
+  {cat:"Containers", name:"Podman containers",            kind:"file", rels:["live_response/containers/podman_container_ls_--all_--size.txt","live_response/containers/podman_ps_-a.txt","live_response/containers/podman_ps.txt"], desc:"Podman container inventory"},
+  {cat:"Containers", name:"LXD/LXC",                      kind:"file", rels:["live_response/containers/lxc_list.txt","live_response/containers/lxc_info.txt"], desc:"LXD instance list / server info"}
 ];
 var INVENTORY=[];
 function buildInventory(root){
@@ -2563,29 +2635,566 @@ function readUtf8Safe(path){ try{ var sz=fileSize(path); if(sz<=4194304) return 
   var f=fso.OpenTextFile(path,1,false,0), out=f.Read(4194304); f.Close(); return out;
 }catch(e){ return ""; } }
 
-/* ---- Enhancement 4b: running containers ---- */
+/* ============ v1.9 CONTAINERS parser - start ============
+   Enhancement 4b grew into a full tab. Everything below parses POINT-IN-TIME container state the
+   UAC capture actually holds (live_response/containers): docker/podman info + version + listings,
+   per-container inspect (lifecycle / execution config / isolation / mounts / network), docker diff
+   (path + change type ONLY - no content, ownership or hash), docker top/stats, image/network/volume
+   listings and the LXD tables. None of it is Docker event history and the UI never claims it is. */
+var CTR_REL="live_response/containers/";
+function ctrDirFiles(root){
+  var out=[], p=firstFolder(root,["live_response/containers"]); if(!p) return out;
+  try{ var fso=new ActiveXObject("Scripting.FileSystemObject");
+    var e=new Enumerator(fso.GetFolder(p).Files);
+    for(;!e.atEnd();e.moveNext()){ var f=e.item(); out.push({name:String(f.Name), path:String(f.Path), size:f.Size}); }
+  }catch(e2){}
+  return out;
+}
+/* docker's zero time is 0001-01-01T00:00:00Z - treat anything pre-1971 as "never" */
+function isoZEpoch(s){ var m=String(s||"").match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2}):(\d{2})/);
+  if(!m) return 0; if(+m[1]<1971) return 0;
+  return Math.floor(Date.UTC(+m[1],+m[2]-1,+m[3],+m[4],+m[5],+m[6])/1000); }
+/* balanced-brace slice of "key": { ... } | [ ... ] - string-aware AND depth-aware: only matches the
+   key at the TOP level of the given block, so jsonBlock(inspect,"Config") returns the real Config
+   and not the empty LogConfig.Config nested inside HostConfig (a real docker-inspect footgun). */
+function jsonBlock(text, key){
+  var s=String(text), n=s.length, i=0;
+  while(i<n && " \t\r\n".indexOf(s.charAt(i))>=0) i++;
+  var baseDepth=(s.charAt(i)==="[")?2:1;
+  var depth=0, inStr=false, escp=false;
+  for(i=0;i<n;i++){ var ch=s.charAt(i);
+    if(inStr){ if(escp) escp=false; else if(ch==="\\") escp=true; else if(ch==='"') inStr=false; continue; }
+    if(ch==='"'){
+      if(depth===baseDepth){
+        var j=i+1, kx="";
+        while(j<n){ var c2=s.charAt(j); if(c2==="\\"){ kx+=s.charAt(j+1); j+=2; continue; } if(c2==='"') break; kx+=c2; j++; }
+        var k2=j+1; while(k2<n && " \t\r\n".indexOf(s.charAt(k2))>=0) k2++;
+        if(s.charAt(k2)===":" && kx===key){
+          var v=k2+1; while(v<n && " \t\r\n".indexOf(s.charAt(v))>=0) v++;
+          var open=s.charAt(v);
+          if(open==="{"||open==="["){
+            var close=(open==="{")?"}":"]", d2=0, is2=false, e2=false, x;
+            for(x=v;x<n;x++){ var cx=s.charAt(x);
+              if(is2){ if(e2) e2=false; else if(cx==="\\") e2=true; else if(cx==='"') is2=false; continue; }
+              if(cx==='"'){ is2=true; continue; }
+              if(cx===open) d2++;
+              else if(cx===close){ d2--; if(!d2) return s.substring(v,x+1); } }
+            return ""; } }
+        i=j; continue;   // skip past the string without entering string mode
+      }
+      inStr=true; continue; }
+    if(ch==="{"||ch==="[") depth++;
+    else if(ch==="}"||ch==="]") depth--; }
+  return "";
+}
+function jsonBool(text,key){ var m=String(text).match(new RegExp('"'+key+'"\\s*:\\s*(true|false)')); return m?(m[1]==="true"):null; }
+function jsonStrList(block){ var out=[], re=/"((?:[^"\\]|\\.)*)"/g, m;
+  while((m=re.exec(String(block)))) out.push(m[1].replace(/\\"/g,'"').replace(/\\\\/g,"\\"));
+  return out; }
+/* keys of the top-level entries inside a { "name": {...}, ... } block (docker Networks / Ports).
+   A string right after a top-level ':' is a scalar VALUE, not a key - pendingValue skips it. */
+function jsonTopKeys(block){ var out=[], s=String(block), depth=0, inStr=false, escp=false, cur="", collecting=false, pendingValue=false, i;
+  for(i=0;i<s.length;i++){ var ch=s.charAt(i);
+    if(inStr){ if(escp){ escp=false; } else if(ch==="\\"){ escp=true; } else if(ch==='"'){ inStr=false; if(collecting && depth===1){ out.push(cur); } collecting=false; } else if(collecting) cur+=ch;
+      continue; }
+    if(ch==='"'){ inStr=true; if(depth===1&&!pendingValue){ cur=""; collecting=true; } continue; }
+    if(ch==="{"||ch==="["){ depth++; if(depth>1) pendingValue=false; continue; }
+    if(ch==="}"||ch==="]"){ depth--; pendingValue=false; continue; }
+    if(ch===":"&&depth===1){ pendingValue=true; continue; }
+    if(ch===","&&depth===1){ pendingValue=false; continue; } }
+  return out;
+}
+/* fixed-offset column slicing for docker/podman table output (values contain single spaces).
+   Column names match at WORD boundaries only - a plain indexOf found "TIME" inside "STIME". */
+function ctrColIndexOf(hdr, name){
+  var from=0;
+  for(;;){ var ix=hdr.indexOf(name, from); if(ix<0) return -1;
+    var before=(ix===0)?" ":hdr.charAt(ix-1), after=(ix+name.length>=hdr.length)?" ":hdr.charAt(ix+name.length);
+    if(/\s/.test(before)&&/\s/.test(after)) return ix;
+    from=ix+1; }
+}
+function ctrHeaderCols(hdr, names){
+  var cols=[], i; for(i=0;i<names.length;i++){ var ix=ctrColIndexOf(hdr, names[i]); if(ix>=0) cols.push({name:names[i], at:ix}); }
+  cols.sort(function(a,b){ return a.at-b.at; });
+  return cols;
+}
+function ctrSlice(line, cols, i){
+  var from=cols[i].at, to=(i+1<cols.length)?cols[i+1].at:line.length;
+  if(from>=line.length) return "";
+  return trimStr(line.substring(from, to<line.length?to:line.length));
+}
+function ctrColVal(vals, cols, name){ for(var i=0;i<cols.length;i++){ if(cols[i].name===name) return vals[i]; } return ""; }
+/* classify a collected command-output file: was the runtime actually reachable? */
+function ctrFileState(txt){
+  var t=lc(String(txt||""));
+  if(/permission denied|access denied|got permission denied/.test(t)) return "denied";
+  if(/cannot connect to the docker daemon|docker daemon is not running|is the docker daemon running|error: you must be root|unable to connect/.test(t)) return "failed";
+  if(/command not found|no such file or directory: 'docker'|executable file not found/.test(t)) return "notinstalled";
+  return "ok";
+}
 function parseContainers(root){
-  CONTAINERS=[];
-  parseContainerPs(root, ["live_response/containers/docker_container_ls_--all_--size.txt","live_response/containers/docker_ps_-a.txt","live_response/containers/docker_ps.txt"], "docker");
-  parseContainerPs(root, ["live_response/containers/podman_container_ls_--all_--size.txt","live_response/containers/podman_ps_-a.txt","live_response/containers/podman_ps.txt"], "podman");
-  parseDockerDeep(root);
+  CONTAINERS=[]; CTR_SEL=-1;
+  CTRX={dirPresent:false, files:[], byName:{}, docker:null, podman:null, lxc:null,
+        images:[], networks:[], volumes:-1, netInspectN:0, containerd:false, coverage:[], rtFindings:[], any:false};
+  var files=ctrDirFiles(root), i;
+  CTRX.files=files;
+  for(i=0;i<files.length;i++) CTRX.byName[lc(files[i].name)]=files[i];
+  CTRX.dirPresent=!!firstFolder(root,["live_response/containers"]);
+  if(!CTRX.dirPresent){ buildCtrCoverage(root); return; }
+  // ---- runtime metadata ----
+  CTRX.docker=parseCtrRuntime(root,"docker");
+  CTRX.podman=parseCtrRuntime(root,"podman");
+  CTRX.lxc=parseCtrLxc(root);
+  // ---- global listings (docker only collects these today; podman equivalents parse the same) ----
+  parseCtrImages(root);
+  parseCtrNetworks(root);
+  parseCtrVolumes(root);
+  // ---- container inventory (incl. stopped - ps -a / container ls --all) ----
+  parseContainerPs(root, [CTR_REL+"docker_container_ls_--all_--size.txt",CTR_REL+"docker_ps_-a.txt",CTR_REL+"docker_ps.txt"], "docker");
+  parseContainerPs(root, [CTR_REL+"podman_container_ls_--all_--size.txt",CTR_REL+"podman_ps_-a.txt",CTR_REL+"podman_ps.txt"], "podman");
+  // inspect/diff files with no matching listing row (defensive - shouldn't happen in a sane capture)
+  for(i=0;i<files.length;i++){ var om=files[i].name.match(/^(docker|podman)_inspect_([0-9a-f]{6,64})\.txt$/i);
+    if(om && !ctrById(om[2])){ CONTAINERS.push({kind:"container", engine:lc(om[1]), id:om[2], image:"", cmd:"", created:"", status:"(not in listing)", ports:"", size:"", names:"", running:false, deep:[], score:0, tags:[], reasons:[], blob:""}); } }
+  // ---- per-container deep artifacts ----
+  for(i=0;i<CONTAINERS.length;i++) parseCtrDeepOne(root, CONTAINERS[i]);
+  parseCtrStats(root);
+  CTRX.containerd=!!CTRX.byName["containerd_config_dump.txt"];
+  CTRX.any = (CTRX.docker&&CTRX.docker.installed)||(CTRX.podman&&CTRX.podman.installed)||(CTRX.lxc&&CTRX.lxc.installed)||CONTAINERS.length>0;
+  buildCtrCoverage(root);
+  appendLog("Containers: "+nf(CONTAINERS.length)+" container(s); docker "+(CTRX.docker&&CTRX.docker.installed?"present":"absent")
+    +", podman "+(CTRX.podman&&CTRX.podman.installed?"present":"absent")+", lxd "+(CTRX.lxc&&CTRX.lxc.installed?"present":"absent")+".");
+}
+function ctrById(id){ id=lc(id); for(var i=0;i<CONTAINERS.length;i++){ var c=CONTAINERS[i];
+  if(lc(c.id)===id || (c.fullId&&lc(c.fullId).indexOf(id)===0) || id.indexOf(lc(c.id))===0) return c; } return null; }
+/* ---- docker/podman info + version -> runtime metadata + runtime-level findings ---- */
+function parseCtrRuntime(root, engine){
+  var infoP=firstFile(root,[CTR_REL+engine+"_info.txt"]), verP=firstFile(root,[CTR_REL+engine+"_version.txt"]);
+  var rt={engine:engine, installed:false, infoPath:infoP, verPath:verP, state:"absent",
+          client:"", server:"", containerd:"", runc:"", storage:"", backingFs:"", logging:"", cgroupDrv:"", cgroupVer:"",
+          kernel:"", os:"", osType:"", arch:"", cpus:"", mem:"", rootDir:"", secOpts:[], seccompProfile:"",
+          liveRestore:"", swarm:"", firewall:"", experimental:"", name:"",
+          insecureReg:[], mirrors:[], httpProxy:"", httpsProxy:"", noProxy:"",
+          total:"", running:"", paused:"", stopped:"", images:"", findings:[]};
+  if(!infoP && !verP) return rt;
+  var txt=infoP?readUtf8Safe(infoP):"";
+  var st=ctrFileState(txt); rt.state=st;
+  if(st==="notinstalled") return rt;
+  rt.installed=(trimStr(txt)!==""&&st==="ok") || !!verP;
+  // docker info: indented "Key: value" lines with list sections; podman info: YAML-ish "key: value"
+  var lines=String(txt).split("\n"), listKey="", listIndent=-1, sect="", i;
+  function indentOf(s){ var m=s.match(/^\s*/); return m?m[0].length:0; }
+  for(i=0;i<lines.length;i++){ var raw=lines[i].replace(/\r$/,""); var t=trimStr(raw); if(!t) continue;
+    var ind=indentOf(raw);
+    if(listKey){ if(ind>listIndent && t.indexOf(":")<0){   // plain list items only (skip "Profile: x" sub-keys)
+        if(listKey==="insecure") rt.insecureReg.push(t);
+        else if(listKey==="mirrors") rt.mirrors.push(t);
+        else if(listKey==="secopts") rt.secOpts.push(t);
+        continue; }
+      else if(ind>listIndent && listKey==="secopts"){ var pm=t.match(/^Profile:\s*(.+)$/i); if(pm){ rt.seccompProfile=pm[1]; continue; } }
+      listKey=""; }
+    if(/^Client:?$/i.test(t)){ sect="client"; continue; }
+    if(/^Server:?$/i.test(t)){ sect="server"; continue; }
+    var kv=t.match(/^([A-Za-z][A-Za-z0-9 .\/_-]*):\s*(.*)$/); if(!kv) continue;
+    var k=lc(kv[1]), v=trimStr(kv[2]);
+    if(k==="version"&&sect==="client"&&!rt.client) rt.client=v;
+    else if(k==="server version"||(k==="version"&&sect==="server"&&!rt.server)) rt.server=v;
+    else if(k==="storage driver"||k==="graphdrivername"){ rt.storage=v||rt.storage; }
+    else if(k==="backing filesystem") rt.backingFs=v;
+    else if(k==="logging driver"||k==="logdriver") rt.logging=v||rt.logging;
+    else if(k==="cgroup driver"||k==="cgroupmanager") rt.cgroupDrv=v||rt.cgroupDrv;
+    else if(k==="cgroup version"||k==="cgroupversion") rt.cgroupVer=v||rt.cgroupVer;
+    else if(k==="kernel version"||k==="kernel") rt.kernel=v||rt.kernel;
+    else if(k==="operating system"||k==="distribution") rt.os=v||rt.os;
+    else if(k==="ostype"||k==="os") rt.osType=v||rt.osType;
+    else if(k==="architecture"||k==="arch") rt.arch=v||rt.arch;
+    else if(k==="cpus") rt.cpus=v;
+    else if(k==="total memory"||k==="memtotal") rt.mem=v||rt.mem;
+    else if(k==="docker root dir"||k==="graphroot") rt.rootDir=v||rt.rootDir;
+    else if(k==="live restore enabled") rt.liveRestore=v;
+    else if(k==="swarm") rt.swarm=v;
+    else if(k==="firewall backend") rt.firewall=v;
+    else if(k==="experimental") rt.experimental=v;
+    else if(k==="name"&&!rt.name) rt.name=v;
+    else if(k==="containers") rt.total=v;
+    else if(k==="running"&&rt.running==="") rt.running=v;
+    else if(k==="paused"&&rt.paused==="") rt.paused=v;
+    else if(k==="stopped"&&rt.stopped==="") rt.stopped=v;
+    else if(k==="images"&&rt.images==="") rt.images=v;
+    else if(k==="http proxy") rt.httpProxy=v;
+    else if(k==="https proxy") rt.httpsProxy=v;
+    else if(k==="no proxy") rt.noProxy=v;
+    else if(k==="insecure registries"){ listKey="insecure"; listIndent=ind; }
+    else if(k==="registry mirrors"){ listKey="mirrors"; listIndent=ind; }
+    else if(k==="security options"){ listKey="secopts"; listIndent=ind; }
+  }
+  // docker_version.txt: component versions (containerd / runc) + a fallback for client/server
+  if(verP){ var vt=String(readUtf8Safe(verP)), vsect="";
+    var vls=vt.split("\n"); for(i=0;i<vls.length;i++){ var vl=trimStr(vls[i]); if(!vl) continue;
+      if(/^Client/i.test(vl)){ vsect="client"; continue; }
+      if(/^Server/i.test(vl)){ vsect="server"; continue; }
+      if(/^containerd:/i.test(vl)){ vsect="containerd"; continue; }
+      if(/^runc:/i.test(vl)){ vsect="runc"; continue; }
+      if(/^docker-init:/i.test(vl)){ vsect="init"; continue; }
+      var vm=vl.match(/^Version:\s*(.+)$/i); if(!vm) continue;
+      if(vsect==="client"&&!rt.client) rt.client=trimStr(vm[1]);
+      else if(vsect==="server"&&!rt.server) rt.server=trimStr(vm[1]);
+      else if(vsect==="containerd") rt.containerd=trimStr(vm[1]);
+      else if(vsect==="runc") rt.runc=trimStr(vm[1]); }
+    if(!rt.installed && (rt.client||rt.server)) rt.installed=true; }
+  // ---- runtime-level findings (feed the tab + Security posture) ----
+  var j; for(j=0;j<rt.insecureReg.length;j++){ var reg=rt.insecureReg[j];
+    if(reg!=="127.0.0.0/8"&&reg!=="::1/128"){ rt.findings.push({s:2, tag:"INSECURE-REG", reason:engine+": non-loopback insecure registry configured: "+reg+" (images can be pulled over plain HTTP / without TLS verification)"}); } }
+  if(rt.rootDir && engine==="docker" && rt.rootDir!=="/var/lib/docker")
+    rt.findings.push({s:1, tag:"CTR-ROOTDIR", reason:"docker root dir is non-standard: "+rt.rootDir+" (relocated image/container storage - verify it is deliberate)"});
+  if(rt.secOpts.length){ var hasAA=false, hasSec=false, hasSel=false;
+    for(j=0;j<rt.secOpts.length;j++){ var so=lc(rt.secOpts[j]); if(so.indexOf("apparmor")>=0) hasAA=true; if(so.indexOf("seccomp")>=0) hasSec=true; if(so.indexOf("selinux")>=0) hasSel=true; }
+    if(!hasAA&&!hasSel) rt.findings.push({s:1, tag:"NO-MAC", reason:engine+": no AppArmor/SELinux support in Security Options - containers run without MAC confinement"});
+    if(!hasSec) rt.findings.push({s:1, tag:"NO-SECCOMP", reason:engine+": no seccomp support in Security Options - syscall filtering unavailable"}); }
+  if(/^active$/i.test(rt.swarm)) rt.findings.push({s:1, tag:"SWARM", reason:"docker swarm mode is ACTIVE - verify this host is expected to be an orchestrator/worker"});
+  if(rt.httpProxy||rt.httpsProxy) rt.findings.push({s:1, tag:"CTR-PROXY", reason:engine+": daemon egress proxy configured ("+trimStr((rt.httpProxy||"")+" "+(rt.httpsProxy||""))+") - image pulls/API calls route through it"});
+  for(j=0;j<rt.mirrors.length;j++) rt.findings.push({s:1, tag:"REG-MIRROR", reason:engine+": registry mirror configured: "+rt.mirrors[j]+" - images may come from a non-default source"});
+  for(j=0;j<rt.findings.length;j++) CTRX.rtFindings.push(rt.findings[j]);
+  return rt;
+}
+/* ---- LXD/LXC: version + instance list + warnings (tables are space-padded columns) ---- */
+function parseCtrLxc(root){
+  var lx={installed:false, version:"", instances:0, images:0, warnings:[], listPath:firstFile(root,[CTR_REL+"lxc_list.txt"])};
+  var vp=firstFile(root,[CTR_REL+"lxc_version.txt"]);
+  if(vp){ var vt=readUtf8Safe(vp); var vm=String(vt).match(/Server version:\s*([^\r\n]+)/i);
+    if(vm){ lx.version=trimStr(vm[1]); lx.installed=true; } }
+  if(lx.listPath){ var ls=readLines(lx.listPath), i, sawHdr=false;
+    for(i=0;i<ls.length;i++){ var l=trimStr(ls[i]); if(!l) continue;
+      if(/\bNAME\b/.test(l)&&/\bSTATE\b/.test(l)){ sawHdr=true; continue; }
+      if(sawHdr && !/^[+|-]/.test(l) && !/Installing LXD snap/i.test(l)) lx.instances++; }
+    if(sawHdr) lx.installed=true; }
+  var wp=firstFile(root,[CTR_REL+"lxc_warning_list.txt"]);
+  if(wp){ var ws=readLines(wp), j;
+    for(j=0;j<ws.length;j++){ var w=trimStr(ws[j]).replace(/\s{2,}/g," · ");
+      if(/^[0-9a-f]{8}-/.test(w)) lx.warnings.push(trunc(w,160)); } }
+  return lx;
+}
+function parseCtrImages(root){
+  var p=firstFile(root,[CTR_REL+"docker_image_ls_--all.txt",CTR_REL+"docker_images.txt",CTR_REL+"podman_image_ls_--all.txt",CTR_REL+"podman_images.txt"]); if(!p) return;
+  var lines=readLines(p); if(!lines.length) return;
+  var hdr=lines[0], cols;
+  if(/REPOSITORY/.test(hdr)) cols=ctrHeaderCols(hdr,["REPOSITORY","TAG","IMAGE ID","CREATED","SIZE"]);
+  else if(/IMAGE/.test(hdr)) cols=ctrHeaderCols(hdr,["IMAGE","ID","DISK USAGE","CONTENT SIZE","EXTRA"]);
+  else return;
+  for(var i=1;i<lines.length;i++){ if(!trimStr(lines[i])) continue;
+    var vals=[], k; for(k=0;k<cols.length;k++) vals.push(ctrSlice(lines[i],cols,k));
+    var ref=ctrColVal(vals,cols,"IMAGE")||trimStr((ctrColVal(vals,cols,"REPOSITORY")||"")+":"+(ctrColVal(vals,cols,"TAG")||""));
+    CTRX.images.push({ref:ref.replace(/:$/,""), id:ctrColVal(vals,cols,"ID")||ctrColVal(vals,cols,"IMAGE ID"), size:ctrColVal(vals,cols,"DISK USAGE")||ctrColVal(vals,cols,"SIZE")}); }
+}
+function parseCtrNetworks(root){
+  var p=firstFile(root,[CTR_REL+"docker_network_ls.txt",CTR_REL+"podman_network_ls.txt"]); if(!p) return;
+  var lines=readLines(p); if(!lines.length||!/NETWORK ID|NAME/.test(lines[0])) return;
+  var cols=ctrHeaderCols(lines[0],["NETWORK ID","NAME","DRIVER","SCOPE"]);
+  for(var i=1;i<lines.length;i++){ if(!trimStr(lines[i])) continue;
+    var vals=[], k; for(k=0;k<cols.length;k++) vals.push(ctrSlice(lines[i],cols,k));
+    CTRX.networks.push({id:ctrColVal(vals,cols,"NETWORK ID"), name:ctrColVal(vals,cols,"NAME"), driver:ctrColVal(vals,cols,"DRIVER"), scope:ctrColVal(vals,cols,"SCOPE")}); }
+  // non-empty docker_network_inspect_* files (UAC also emits empty [] ones for container ids)
+  for(var f=0;f<CTRX.files.length;f++){ var nm=CTRX.files[f].name;
+    if(/^(docker|podman)_network_inspect_/i.test(nm) && CTRX.files[f].size>10) CTRX.netInspectN++; }
+}
+function parseCtrVolumes(root){
+  var p=firstFile(root,[CTR_REL+"docker_volume_ls.txt",CTR_REL+"podman_volume_ls.txt"]); if(!p) return;
+  var lines=readLines(p), n=0;
+  for(var i=1;i<lines.length;i++){ if(trimStr(lines[i])) n++; }
+  CTRX.volumes=n;
 }
 function parseContainerPs(root, rels, engine){
   var p=firstFile(root, rels); if(!p) return;
   var lines=readLines(p); if(!lines.length) return;
-  // header: CONTAINER ID  IMAGE  COMMAND  CREATED  STATUS  PORTS  NAMES - split on 2+ spaces
   var hdr=lines[0]; if(!/CONTAINER ID/i.test(hdr)) return;
+  // fixed-offset slicing (docker pads columns) - a 2+-space split breaks on "3 months ago" etc.
+  var cols=ctrHeaderCols(hdr,["CONTAINER ID","IMAGE","COMMAND","CREATED","STATUS","PORTS","NAMES","SIZE"]);
   for(var i=1;i<lines.length;i++){ var t=trimStr(lines[i]); if(t==="") continue;
-    var cols=lines[i].split(/\s{2,}/); // wide-gap columns
-    var id=trimStr(cols[0]||""), image=trimStr(cols[1]||""), cmd=trimStr(cols[2]||""),
-        status=trimStr(cols[4]||cols[3]||""), names=trimStr(cols[cols.length-1]||"");
-    var r={ kind:"container", engine:engine, id:id, image:image, cmd:cmd, status:status, names:names, deep:[], score:0, tags:[], reasons:[] };
-    r.blob=lc(image+" "+cmd+" "+names);
-    var h=iocHit(r.blob); if(h){ r.score+=3; r.tags.push("IOC"); r.reasons.push("IOC hit: "+h); }
-    if(/:latest|^[0-9a-f]{12}$/.test(lc(image))===false && image.indexOf("/")<0 && image!==""){ } // (no score, just parsed)
+    var vals=[], k; for(k=0;k<cols.length;k++) vals.push(ctrSlice(lines[i],cols,k));
+    var status=ctrColVal(vals,cols,"STATUS");
+    var r={ kind:"container", engine:engine, id:ctrColVal(vals,cols,"CONTAINER ID"),
+            image:ctrColVal(vals,cols,"IMAGE"), cmd:ctrColVal(vals,cols,"COMMAND").replace(/^"|"$/g,""),
+            created:ctrColVal(vals,cols,"CREATED"), status:status, ports:ctrColVal(vals,cols,"PORTS"),
+            size:ctrColVal(vals,cols,"SIZE"), names:ctrColVal(vals,cols,"NAMES"),
+            running:/^Up\b/i.test(status), deep:[], score:0, tags:[], reasons:[] };
+    if(!r.id) continue;
+    r.blob=lc(r.id+" "+r.image+" "+r.cmd+" "+r.names+" "+r.ports);
     CONTAINERS.push(r);
   }
 }
+/* env VALUES are redacted by default; a value that is itself an indicator always shows */
+function ctrEnvIndicator(nm, val){
+  if(/^LD_PRELOAD$/i.test(nm) && trimStr(val)) return "LD_PRELOAD injection";
+  if(/^(\/tmp|\/var\/tmp|\/dev\/shm)\//.test(val)) return "temp-path value";
+  var ipm=val.match(/\b(\d{1,3}(?:\.\d{1,3}){3}):(\d{2,5})\b/);
+  if(ipm && !ipIsLocal(ipm[1])) return "public IP:port endpoint";
+  if(/^https?:\/\//i.test(val)) return "URL value";
+  if(/^[a-z0-9][a-z0-9.-]*\.[a-z]{2,}:\d{2,5}$/i.test(val)) return "host:port endpoint";
+  return "";
+}
+/* ---- per-container: inspect + diff + top (docker & podman file layouts share the prefix) ---- */
+function parseCtrDeepOne(root, c){
+  var eng=c.engine||"docker";
+  var iPath=firstFile(root,[CTR_REL+eng+"_inspect_"+c.id+".txt"]);
+  c.inspPath=iPath;
+  if(iPath){ var insp=readUtf8Safe(iPath); if(trimStr(insp)&&insp.charAt(0)==="["&&insp.length>10) parseCtrInspect(c, insp); }
+  var dPath=firstFile(root,[CTR_REL+eng+"_diff_"+c.id+".txt"]);
+  c.diffPath=dPath;
+  if(dPath) parseCtrDiff(c, readLines(dPath));
+  var tPath=firstFile(root,[CTR_REL+eng+"_top_"+c.id+".txt"]);
+  if(tPath) parseCtrTop(c, readLines(tPath));
+  // IOC blob covers everything we parsed (env names+values, entrypoint, mounts, image id)
+  var extra=[c.entrypoint||"", c.cmdCfg||"", c.imageRef||"", c.imageId||"", c.hostname||""], i;
+  if(c.env){ for(i=0;i<c.env.length;i++) extra.push(c.env[i].name+"="+c.env[i].val); }
+  if(c.mounts){ for(i=0;i<c.mounts.length;i++) extra.push(c.mounts[i].src+" "+c.mounts[i].dst); }
+  c.blob=lc((c.blob||"")+" "+extra.join(" "));
+}
+function parseCtrInspect(c, insp){
+  c.inspected=true;
+  var state=jsonBlock(insp,"State"), host=jsonBlock(insp,"HostConfig"), cfg=jsonBlock(insp,"Config"), net=jsonBlock(insp,"NetworkSettings");
+  c.fullId=jsonStr(insp,"Id")||c.id;
+  c.createdEp=isoZEpoch(jsonStr(insp,"Created"));
+  c.restartCount=parseInt(jsonStr(insp,"RestartCount"),10)||0;
+  c.apparmor=jsonStr(insp,"AppArmorProfile")||"";
+  var nmTop=jsonStr(insp,"Name"); if(nmTop&&!c.names) c.names=nmTop.replace(/^\//,"");
+  // --- lifecycle (point-in-time state, not the docker events stream) ---
+  if(state){
+    c.stateStatus=jsonStr(state,"Status")||"";
+    c.running=(jsonBool(state,"Running")===true);
+    c.paused=(jsonBool(state,"Paused")===true);
+    c.restarting=(jsonBool(state,"Restarting")===true);
+    c.dead=(jsonBool(state,"Dead")===true);
+    c.oom=(jsonBool(state,"OOMKilled")===true);
+    c.pid=parseInt(jsonStr(state,"Pid"),10)||0;
+    c.exitCode=jsonStr(state,"ExitCode");
+    c.stateErr=jsonStr(state,"Error")||"";
+    c.startedEp=isoZEpoch(jsonStr(state,"StartedAt"));
+    c.finishedEp=isoZEpoch(jsonStr(state,"FinishedAt"));
+    var health=jsonBlock(state,"Health");
+    if(health){ c.healthStatus=jsonStr(health,"Status")||""; c.healthFails=jsonStr(health,"FailingStreak")||""; }
+    if(c.oom) c.deep.push({s:1, tag:"CTR-OOM", reason:"container was OOM-killed (memory exhaustion - miner / runaway payload tell when unexpected)"});
+    if(c.restartCount>=5) c.deep.push({s:1, tag:"CTR-RESTARTS", reason:"restart count is "+c.restartCount+" - repeated crashes/restarts (failing payload or watchdogged implant)"});
+  }
+  // --- host config: isolation & exposure ---
+  if(host){
+    var privileged=(jsonBool(host,"Privileged")===true);
+    if(privileged) c.deep.push({s:3, tag:"PRIVILEGED", reason:"container runs privileged - full host device + capability access"});
+    var nsHits=[], nsMap=[["PidMode","pid"],["NetworkMode","network"],["IpcMode","ipc"],["UTSMode","uts"],["UsernsMode","userns"]], n;
+    for(n=0;n<nsMap.length;n++){ var nv=jsonStr(host,nsMap[n][0]); if(lc(nv||"")==="host") nsHits.push(nsMap[n][1]); }
+    c.netMode=jsonStr(host,"NetworkMode")||"";
+    if(nsHits.length) c.deep.push({s:2, tag:"HOST-NS", reason:"container shares host namespace(s): "+nsHits.join(", ")});
+    c.restartPolicy=""; var rp=jsonBlock(host,"RestartPolicy"); if(rp) c.restartPolicy=jsonStr(rp,"Name")||"";
+    c.autoRemove=(jsonBool(host,"AutoRemove")===true);
+    c.readonlyRootfs=(jsonBool(host,"ReadonlyRootfs")===true);
+    var capB=jsonBlock(host,"CapAdd"); c.capAdd=capB?jsonStrList(capB):[];
+    var dangerous=["SYS_ADMIN","SYS_MODULE","SYS_PTRACE","DAC_READ_SEARCH","NET_ADMIN","SYS_RAWIO","BPF","ALL"], dcaps=[], dc;
+    for(dc=0;dc<c.capAdd.length;dc++){ var cap=String(c.capAdd[dc]).replace(/^CAP_/i,"").toUpperCase();
+      for(n=0;n<dangerous.length;n++){ if(cap===dangerous[n]){ dcaps.push(cap); break; } } }
+    if(dcaps.length) c.deep.push({s:(dcaps[0]==="ALL"?3:2), tag:"CAP-ADD", reason:"dangerous capabilit"+(dcaps.length===1?"y":"ies")+" added: "+dcaps.join(", ")+" (host-control / injection surface)"});
+    var soB=jsonBlock(host,"SecurityOpt"); c.securityOpt=soB?jsonStrList(soB):[];
+    var unconf=[], noNewPriv=false;
+    for(n=0;n<c.securityOpt.length;n++){ var so=lc(c.securityOpt[n]);
+      if(so.indexOf("unconfined")>=0) unconf.push(c.securityOpt[n]);
+      if(so.indexOf("no-new-privileges")>=0) noNewPriv=true; }
+    c.noNewPrivileges=noNewPriv;
+    if(unconf.length) c.deep.push({s:2, tag:"UNCONFINED", reason:"AppArmor/seccomp set to unconfined: "+unconf.join(", ")});
+    if(lc(c.apparmor)==="unconfined" && !unconf.length) c.deep.push({s:2, tag:"UNCONFINED", reason:"AppArmorProfile is unconfined"});
+    var devB=jsonBlock(host,"Devices"); c.devices=devB?(devB.replace(/\s/g,"").length>4):false;
+    if(c.devices) c.deep.push({s:1, tag:"DEV-MAP", reason:"host device(s) mapped into the container (HostConfig.Devices)"});
+  }
+  // --- config: execution ---
+  if(cfg){
+    c.hostname=jsonStr(cfg,"Hostname")||"";
+    c.user=jsonStr(cfg,"User")||"";
+    c.workdir=jsonStr(cfg,"WorkingDir")||"";
+    c.imageRef=jsonStr(cfg,"Image")||"";
+    c.stopSignal=jsonStr(cfg,"StopSignal")||"";
+    var entB=jsonBlock(cfg,"Entrypoint"); c.entrypoint=entB?jsonStrList(entB).join(" "):"";
+    var cmdB=jsonBlock(cfg,"Cmd"); c.cmdCfg=cmdB?jsonStrList(cmdB).join(" "):"";
+    var hcB=jsonBlock(cfg,"Healthcheck"); c.healthCmd="";
+    if(hcB){ var testB=jsonBlock(hcB,"Test"); if(testB){ var tl=jsonStrList(testB), t2=[], q;
+      for(q=0;q<tl.length;q++){ if(tl[q]!=="CMD"&&tl[q]!=="CMD-SHELL"&&tl[q]!=="NONE") t2.push(tl[q]); }
+      c.healthCmd=t2.join(" "); } }
+    // env: names always shown; values redacted at render unless indicator-bearing
+    c.env=[]; var envB=jsonBlock(cfg,"Env");
+    if(envB){ var evs=jsonStrList(envB), e2;
+      for(e2=0;e2<evs.length;e2++){ var eq=evs[e2].indexOf("=");
+        var enm=eq>=0?evs[e2].substring(0,eq):evs[e2], evl=eq>=0?evs[e2].substring(eq+1):"";
+        var ind=ctrEnvIndicator(enm,evl);
+        c.env.push({name:enm, val:evl, ind:ind});
+        if(ind==="LD_PRELOAD injection") c.deep.push({s:3, tag:"CTR-ENV", reason:"environment injects LD_PRELOAD="+trunc(evl,60)});
+        else if(ind==="public IP:port endpoint") c.deep.push({s:2, tag:"CTR-ENV", reason:"environment value carries a public endpoint: "+enm+"="+trunc(evl,60)});
+        else if(ind==="temp-path value") c.deep.push({s:2, tag:"CTR-ENV", reason:"environment value points into a temp path: "+enm+"="+trunc(evl,60)});
+      } }
+    c.labels={}; c.composeProject=""; c.composeService="";
+    var labB=jsonBlock(cfg,"Labels");
+    if(labB){ var lre=/"((?:[^"\\]|\\.)+)"\s*:\s*"((?:[^"\\]|\\.)*)"/g, lm;
+      while((lm=lre.exec(labB))){ c.labels[lm[1]]=lm[2];
+        if(lm[1]==="com.docker.compose.project") c.composeProject=lm[2];
+        if(lm[1]==="com.docker.compose.service") c.composeService=lm[2]; } }
+    // C2/implant lens over entrypoint + cmd + health check (same lens the Persistence tab uses)
+    var lens=[[c.entrypoint,"entrypoint"],[c.cmdCfg,"cmd"],[c.healthCmd,"health-check"]], L;
+    for(L=0;L<lens.length;L++){ var lv=lens[L][0]; if(!lv) continue;
+      var pats=c2Patterns(lv), pI;
+      for(pI=0;pI<pats.length;pI++) c.deep.push({s:pats[pI][1], tag:pats[pI][0], reason:lens[L][1]+": "+pats[pI][2]});
+      var ih=implantHit(lv);
+      if(ih && (ih.where==="basename"||ih.where==="path")) c.deep.push({s:3, tag:"IMPLANT", reason:lens[L][1]+" matches known implant/miner/C2 name '"+ih.name+"'"});
+      if(lens[L][1]==="health-check" && /curl|wget|nc |ncat|bash -c|\/dev\/tcp/i.test(lv) && !pats.length)
+        c.deep.push({s:1, tag:"HEALTH-CMD", reason:"health check shells out with a network-capable command: "+trunc(lv,80)+" (runs on schedule - beacon-shaped)"});
+    }
+    var iih=implantHit(c.image||c.imageRef||"");
+    if(iih) c.deep.push({s:3, tag:"IMPLANT", reason:"image name matches known implant/miner/C2 name '"+iih.name+"'"});
+  }
+  c.imageId=jsonStr(insp,"Image")||"";
+  // --- mounts ---
+  c.mounts=[]; var mntB=jsonBlock(insp,"Mounts");
+  if(mntB){ var ore=/\{[^{}]*\}/g, om;
+    while((om=ore.exec(mntB))){ var ob=om[0];
+      var mt={type:jsonStr(ob,"Type")||"", name:jsonStr(ob,"Name")||"", src:jsonStr(ob,"Source")||"",
+              dst:jsonStr(ob,"Destination")||"", rw:(jsonBool(ob,"RW")!==false), prop:jsonStr(ob,"Propagation")||""};
+      c.mounts.push(mt); } }
+  var sens=[], sock=false, mi;
+  for(mi=0;mi<c.mounts.length;mi++){ var src=c.mounts[mi].src; if(!src) continue;
+    if(src==="/var/run/docker.sock"||src==="/run/docker.sock"){ sock=true; continue; }
+    if(src==="/"||src==="/etc"||src==="/root"||src==="/boot"||src.indexOf("/proc")===0||src.indexOf("/sys")===0||src==="/dev")
+      sens.push(src+(c.mounts[mi].rw?" (rw)":" (ro)")); }
+  if(sock) c.deep.push({s:3, tag:"DOCKER-SOCK", reason:"docker.sock is mounted into the container - full control of the host docker daemon (root-equivalent)"});
+  if(sens.length) c.deep.push({s:(sens[0].indexOf("/ ")===0||sens[0].indexOf("/ (")===0||sens[0].charAt(1)===" "?3:2), tag:"SENS-MOUNT", reason:"sensitive host path(s) mounted: "+trunc(sens.join(", "),100)});
+  // --- network ---
+  if(net){
+    c.ip=jsonStr(net,"IPAddress")||"";
+    c.mac=jsonStr(net,"MacAddress")||"";
+    c.gateway=jsonStr(net,"Gateway")||"";
+    var nwB=jsonBlock(net,"Networks"); c.networks=nwB?jsonTopKeys(nwB):[];
+    c.pubPorts=[]; var portsB=jsonBlock(net,"Ports");
+    if(portsB){ var pks=jsonTopKeys(portsB), pk;
+      for(pk=0;pk<pks.length;pk++){ var pB=jsonBlock(portsB,pks[pk]);
+        if(!pB||pB==="[]"){ c.pubPorts.push({port:pks[pk], hostIp:"", hostPort:""}); continue; }
+        var hre=/"HostIp"\s*:\s*"([^"]*)"\s*,\s*"HostPort"\s*:\s*"([^"]*)"/g, hm, seenP={};
+        while((hm=hre.exec(pB))){ var kkey=hm[1]+":"+hm[2]; if(seenP[kkey]) continue; seenP[kkey]=1;
+          c.pubPorts.push({port:pks[pk], hostIp:hm[1], hostPort:hm[2]}); } } }
+    var bindAll=false, bp;
+    for(bp=0;bp<c.pubPorts.length;bp++){ if(c.pubPorts[bp].hostIp==="0.0.0.0"||c.pubPorts[bp].hostIp==="::") bindAll=true; }
+    if(bindAll) c.deep.push({s:1, tag:"BIND-ALL", reason:"port(s) published on 0.0.0.0/:: (all interfaces - externally reachable subject to the host firewall)"});
+  }
+  // --- root execution + the critical combo ---
+  var runsRoot=(!c.user||c.user==="root"||c.user==="0");
+  c.runsRoot=runsRoot;
+  var hasPriv=hasCtrDeep(c,"PRIVILEGED"), hasSock=hasCtrDeep(c,"DOCKER-SOCK");
+  if(runsRoot&&(hasPriv||hasSock)) c.deep.push({s:2, tag:"HOST-CONTROL", reason:"critical combination: runs as root + "+(hasPriv?"privileged":"")+(hasPriv&&hasSock?" + ":"")+(hasSock?"docker.sock mounted":"")+" - effectively full host control from inside the container"});
+}
+function hasCtrDeep(c, tag){ for(var i=0;i<c.deep.length;i++){ if(c.deep[i].tag===tag) return true; } return false; }
+/* ---- docker diff: path + change type ONLY (no content/ownership/hash - the UI says so) ---- */
+var CTR_DIFF_ROWCAP=20000;
+function ctrDiffSus(t, p){
+  // returns [score, reason] for a suspicious path, or null
+  if(/^\/etc\/(passwd|shadow|group|gshadow|sudoers)/.test(p)) return [3,"credential/privilege file"];
+  if(/^\/etc\/(pam\.d|security)\//.test(p)) return [3,"PAM/auth configuration"];
+  if(/^\/etc\/(cron|crontab|anacrontab|at\.|systemd|init(\.d)?|rc\d?\.d|rc\.local)/.test(p)||/^\/var\/spool\/cron/.test(p)||/^\/lib\/systemd\//.test(p)) return [3,"persistence location"];
+  if(/^\/etc\/ld\.so/.test(p)) return [3,"loader configuration (ld.so)"];
+  if(/(^|\/)\.ssh(\/|$)/.test(p)||/^\/etc\/ssh\//.test(p)) return [3,"SSH keys/configuration"];
+  if(/^\/usr\/local\/s?bin\//.test(p)) return [2,"/usr/local bin drop"];
+  if(/^\/opt\/[^\/]+$/.test(p)&&t==="A") return [2,"new /opt entry"];
+  if(/^\/(var|srv)\/www\//.test(p)||/^\/usr\/share\/nginx\//.test(p)) return [2,"web root"];
+  if(/^\/(tmp|var\/tmp|dev\/shm)\//.test(p)) return [2,"temp/ram path"];
+  if(t==="D"&&(/^\/var\/log\//.test(p)||/\.(bash|zsh|sh)_history$/.test(p))) return [2,"log/history removal (anti-forensics)"];
+  if(/^\/var\/lib\/(dpkg|rpm)\//.test(p)||/^\/lib\/apk\//.test(p)) return [1,"package-manager database"];
+  if(/\/\.[^\/]+$/.test(p)&&!/\/\.(cache|config|local|wh\.)/.test(p)) return [1,"hidden path"];
+  return null;
+}
+function parseCtrDiff(c, lines){
+  var d={present:true, added:0, changed:0, deleted:0, total:0, byTop:{}, rows:[], susN:0, capped:false};
+  for(var i=0;i<lines.length;i++){ var m=String(lines[i]).match(/^([ACD])\s+(\/.*)$/); if(!m) continue;
+    var t=m[1], p=trimStr(m[2]); d.total++;
+    if(t==="A") d.added++; else if(t==="C") d.changed++; else d.deleted++;
+    var topM=p.match(/^\/([^\/]+)/), top=topM?("/"+topM[1]):"/";
+    d.byTop[top]=(d.byTop[top]||0)+1;
+    var sus=ctrDiffSus(t,p);
+    if(sus) d.susN++;
+    if(d.rows.length<CTR_DIFF_ROWCAP) d.rows.push({t:t, path:p, s:sus?sus[0]:0, why:sus?sus[1]:""});
+    else d.capped=true;
+  }
+  c.diff=d;
+  // roll the highest-signal changes up into scored findings
+  var best3=null, antifor=null, n3=0, nA=0, i2;
+  for(i2=0;i2<d.rows.length;i2++){ var r=d.rows[i2];
+    if(r.s>=3){ n3++; if(!best3) best3=r; }
+    if(/anti-forensics/.test(r.why)){ nA++; if(!antifor) antifor=r; } }
+  if(best3) c.deep.push({s:2, tag:"CTR-IMPLANT", reason:n3+" change(s) at credential/persistence/SSH/loader paths inside the container, e.g. "+best3.t+" "+trunc(best3.path,80)+" (docker diff - path+type only, contents were NOT acquired)"});
+  if(antifor) c.deep.push({s:2, tag:"CTR-ANTIFOR", reason:nA+" log/history deletion(s) inside the container, e.g. "+trunc(antifor.path,80)+" (docker diff)"});
+}
+/* ---- docker top: in-container processes WITH HOST PIDs at collection time ---- */
+function parseCtrTop(c, lines){
+  if(!lines.length||!/\bPID\b/.test(lines[0])) return;
+  var cols=ctrHeaderCols(lines[0],["UID","PID","PPID","C","STIME","TTY","TIME","CMD"]);
+  c.topProcs=[];
+  for(var i=1;i<lines.length;i++){ if(!trimStr(lines[i])) continue;
+    var vals=[], k; for(k=0;k<cols.length;k++) vals.push(ctrSlice(lines[i],cols,k));
+    c.topProcs.push({uid:ctrColVal(vals,cols,"UID"), pid:ctrColVal(vals,cols,"PID"), ppid:ctrColVal(vals,cols,"PPID"),
+                     stime:ctrColVal(vals,cols,"STIME"), cmd:ctrColVal(vals,cols,"CMD")});
+    if(c.topProcs.length>=400) break; }
+}
+/* ---- docker stats --no-stream: point-in-time resource use per container ---- */
+function parseCtrStats(root){
+  var p=firstFile(root,[CTR_REL+"docker_stats_--all_--no-stream_--no-trunc.txt",CTR_REL+"docker_stats_--all_--no-stream.txt",CTR_REL+"podman_stats_--all_--no-stream.txt"]); if(!p) return;
+  var lines=readLines(p); if(!lines.length||!/CONTAINER/.test(lines[0])) return;
+  var cols=ctrHeaderCols(lines[0],["CONTAINER ID","NAME","CPU %","MEM USAGE / LIMIT","MEM %","NET I/O","BLOCK I/O","PIDS"]);
+  for(var i=1;i<lines.length;i++){ if(!trimStr(lines[i])) continue;
+    var vals=[], k; for(k=0;k<cols.length;k++) vals.push(ctrSlice(lines[i],cols,k));
+    var id=ctrColVal(vals,cols,"CONTAINER ID"), c=id?ctrById(id.substring(0,12)):null;
+    if(c) c.stats={cpu:ctrColVal(vals,cols,"CPU %"), mem:ctrColVal(vals,cols,"MEM USAGE / LIMIT"), memPct:ctrColVal(vals,cols,"MEM %"),
+                   net:ctrColVal(vals,cols,"NET I/O"), blk:ctrColVal(vals,cols,"BLOCK I/O"), pids:ctrColVal(vals,cols,"PIDS")}; }
+}
+/* ---- the coverage map: distinguishes not-collected / not-installed / denied / present / empty ---- */
+function ctrCovPush(ev, status, detail, path){ CTRX.coverage.push({ev:ev, status:status, detail:detail, path:path||""}); }
+function buildCtrCoverage(root){
+  if(!CTRX.dirPresent){
+    ctrCovPush("live_response/containers","na","artifact group NOT collected by this profile - container state on the host (if any) is simply not in this capture","");
+    return;
+  }
+  function fileOf(n){ return CTRX.byName[lc(n)]||null; }
+  function engineRows(eng, rt){
+    var info=fileOf(eng+"_info.txt"), ver=fileOf(eng+"_version.txt");
+    var lsNames=[eng+"_container_ls_--all_--size.txt",eng+"_ps_-a.txt",eng+"_ps.txt"], ls=null, li;
+    for(li=0;li<lsNames.length;li++){ if(fileOf(lsNames[li])){ ls=fileOf(lsNames[li]); break; } }
+    var label=eng.charAt(0).toUpperCase()+eng.substring(1);
+    if(!info&&!ver&&!ls){ ctrCovPush(label+" runtime","absent","no "+eng+"_* artifacts - the collector found no "+eng+" binary on the host (runtime not installed), or the profile skipped it",""); return; }
+    if(rt.state==="denied") ctrCovPush(label+" runtime information","denied","artifact present but the command hit a permission error - non-root collection cannot query the daemon", info?info.path:"");
+    else if(rt.state==="failed") ctrCovPush(label+" runtime information","failed",eng+" was installed but the daemon was not reachable at collection - runtime state is unavailable, static artifacts may still exist", info?info.path:"");
+    else if(info||ver){ var rdet=(rt.server?("server "+rt.server):(rt.client?("client "+rt.client):"parsed"));
+      if(rt.total!=="") rdet+=" · "+rt.total+" container(s): "+rt.running+" running / "+rt.stopped+" stopped";
+      ctrCovPush(label+" runtime information","present",rdet, info?info.path:(ver?ver.path:"")); }
+    var engRows=0, ci; for(ci=0;ci<CONTAINERS.length;ci++){ if(CONTAINERS[ci].engine===eng) engRows++; }
+    if(ls) ctrCovPush(label+" container inventory","present",nf(engRows)+" container(s) parsed from "+ls.name+(engRows===0?" - runtime installed, no containers exist":""), ls.path);
+    else ctrCovPush(label+" container inventory","absent","no listing artifact ("+eng+"_ps / container_ls) in the capture","");
+    if(engRows>0){
+      var iN=0, dN=0, tN=0, missI=[], missD=[];
+      for(ci=0;ci<CONTAINERS.length;ci++){ var cc=CONTAINERS[ci]; if(cc.engine!==eng) continue;
+        if(cc.inspected) iN++; else missI.push(cc.id);
+        if(cc.diff&&cc.diff.present) dN++; else missD.push(cc.id);
+        if(cc.topProcs&&cc.topProcs.length) tN++; }
+      ctrCovPush(label+" inspect files", iN===engRows?"present":(iN?"partial":"absent"), iN+" of "+engRows+" container(s)"+(missI.length?(" - missing: "+trunc(missI.join(", "),60)):"")+" - lifecycle/isolation/mount/network deep-dive "+(iN?"enabled":"unavailable"),"");
+      ctrCovPush(label+" diff files", dN===engRows?"present":(dN?"partial":"absent"), dN+" of "+engRows+" container(s)"+(missD.length?(" - missing: "+trunc(missD.join(", "),60)):"")+" - filesystem-change analysis "+(dN?"enabled":"unavailable")+" (path + change type only; file contents were not acquired)","");
+      ctrCovPush(label+" in-container processes (top)", tN?"present":"absent", tN+" of "+engRows+" container(s) with a host-PID process snapshot at collection","");
+    }
+  }
+  engineRows("docker", CTRX.docker||{state:"absent"});
+  engineRows("podman", CTRX.podman||{state:"absent"});
+  // global docker listings
+  function simpleRow(label, names, detail){
+    var f=null, i; for(i=0;i<names.length;i++){ if(CTRX.byName[lc(names[i])]){ f=CTRX.byName[lc(names[i])]; break; } }
+    if(f) ctrCovPush(label,"present",detail,f.path); }
+  simpleRow("Image listing",["docker_image_ls_--all.txt","docker_images.txt","podman_image_ls_--all.txt"], nf(CTRX.images.length)+" image(s)");
+  simpleRow("Network listing",["docker_network_ls.txt","podman_network_ls.txt"], nf(CTRX.networks.length)+" network(s)"+(CTRX.netInspectN?(" · "+CTRX.netInspectN+" network-inspect file(s)"):""));
+  simpleRow("Volume listing",["docker_volume_ls.txt","podman_volume_ls.txt"], CTRX.volumes>0?(nf(CTRX.volumes)+" named volume(s) - volume CONTENTS are not in the capture"):"no named volumes");
+  simpleRow("Resource stats",["docker_stats_--all_--no-stream_--no-trunc.txt","docker_stats_--all_--no-stream.txt"],"point-in-time CPU/memory/IO per container");
+  if(CTRX.containerd) ctrCovPush("containerd config","present","daemon configuration dump", (CTRX.byName["containerd_config_dump.txt"]||{}).path);
+  // LXD
+  if(CTRX.lxc&&(CTRX.lxc.installed||CTRX.lxc.version))
+    ctrCovPush("LXD/LXC","present",(CTRX.lxc.version?("server "+CTRX.lxc.version+" · "):"")+nf(CTRX.lxc.instances)+" instance(s)"+(CTRX.lxc.warnings.length?(" · "+CTRX.lxc.warnings.length+" warning(s)"):""), CTRX.lxc.listPath);
+  else if(CTRX.byName["lxc_list.txt"]||CTRX.byName["lxc_version.txt"])
+    ctrCovPush("LXD/LXC","absent","lxc artifacts present but no LXD server detected","");
+}
+/* ============ v1.9 CONTAINERS parser - end ============ */
 
 /* ============ v0.4 - Logs-profile parsers (journal / syslog / cloud-init / sar / integrity) ============ */
 
@@ -3359,28 +3968,7 @@ function parseLastFullFile(path){
   return n;
 }
 
-/* ---- docker deep-dive: inspect (privileged / sensitive mounts / 0.0.0.0 binds) + diff ---- */
-function parseDockerDeep(root){
-  for(var i=0;i<CONTAINERS.length;i++){ var c=CONTAINERS[i]; if(!c.id || c.engine!=="docker") continue;
-    var insp=readUtf8Safe(firstFile(root,["live_response/containers/docker_inspect_"+c.id+".txt"]));
-    if(insp){
-      if(/"Privileged":\s*true/.test(insp)) c.deep.push({s:3, tag:"PRIVILEGED", reason:"container runs privileged - full host access"});
-      if(/"(Pid|Network)Mode":\s*"host"/.test(insp)) c.deep.push({s:2, tag:"HOST-NS", reason:"container shares a host namespace (pid/network mode: host)"});
-      var mre=/"Source":\s*"([^"]+)"/g, mm, sens=[];
-      while((mm=mre.exec(insp))){ var src=mm[1];
-        if(src==="/var/run/docker.sock"||src==="/"||src==="/etc"||src==="/root"||src.indexOf("/proc")===0) sens.push(src); }
-      if(sens.length) c.deep.push({s:(sens[0]==="/var/run/docker.sock"||sens[0]==="/")?3:2, tag:"SENS-MOUNT", reason:"container mounts sensitive host path(s): "+trunc(sens.join(", "),90)});
-      if(/"HostIp":\s*"0\.0\.0\.0"/.test(insp)) c.deep.push({s:1, tag:"BIND-ALL", reason:"container port published on 0.0.0.0 (all interfaces)"});
-    }
-    var diff=readLines(firstFile(root,["live_response/containers/docker_diff_"+c.id+".txt"])), added=0, susAdd="";
-    for(var d=0;d<diff.length;d++){ var dl2=trimStr(diff[d]); if(!dl2) continue;
-      if(dl2.charAt(0)==="A") added++;
-      if(/^A \/(usr\/(local\/)?s?bin|etc\/(cron|systemd|ld\.so)|root\/\.ssh)/.test(dl2) && !susAdd) susAdd=dl2.substring(2);
-    }
-    if(susAdd) c.deep.push({s:2, tag:"CTR-IMPLANT", reason:"file added inside the container at a persistence path: "+trunc(susAdd,80)+" (docker diff)"});
-    c.diffAdded=added;
-  }
-}
+/* (v1.9: the docker deep-dive moved into the CONTAINERS parser section - parseCtrDeepOne) */
 
 /* ============ v0.6 - correlation & context ============ */
 
@@ -3437,6 +4025,13 @@ var MITRE={
   "HOST-NS":["T1611","Escape to Host: host namespace"],
   "SENS-MOUNT":["T1610","Deploy Container / sensitive mount"],
   "CTR-IMPLANT":["T1505","Server Software Component (container)"],
+  /* v1.9: Containers tab exposure tags (CTR-ENV / HEALTH-CMD / runtime findings stay unmapped - indicators) */
+  "DOCKER-SOCK":["T1611","Escape to Host: docker.sock mounted"],
+  "CAP-ADD":["T1611","Escape to Host: dangerous capability added"],
+  "HOST-CONTROL":["T1611","Escape to Host: root+privileged/docker.sock combo"],
+  "UNCONFINED":["T1562.001","Impair Defenses: AppArmor/seccomp unconfined"],
+  "CTR-ANTIFOR":["T1070","Indicator Removal inside a container (diff)"],
+  "CTR-SUSPROC":["T1610","Deploy Container: flagged host process"],
   "SSHD-CFG":["T1098.004","SSH config weakened"],
   "PAM-CFG":["T1556.003","Modify Authentication Process: PAM"],
   "PAM-MOD":["T1556.003","Modify Authentication Process: non-standard PAM module"],
@@ -3685,6 +4280,13 @@ function buildEvents(){
     if(wv.score>=3 && wv.epoch){ pushEvent(wv.epoch,"web",wv.score,wv.method+" "+trunc(wv.uri,70)+" from "+wv.ip+" ("+wv.status+")","weblog",wv.tags); wAdd++; } }
   var aAdd=0; for(i=0;i<AUDITX.length && aAdd<2000;i++){ var ax=AUDITX[i];
     if(ax.score>=2 && ax.epoch){ pushEvent(ax.epoch,"audit",ax.score,(ax.user?(ax.user+": "):"")+trunc(ax.detail,90),"auditd",ax.tags); aAdd++; } }
+  // v1.9: container lifecycle points from docker/podman inspect - clearly labelled inspect-derived
+  // point-in-time STATE, not the Docker event stream (which UAC does not collect).
+  for(i=0;i<CONTAINERS.length;i++){ var ct=CONTAINERS[i]; var cn=ct.names||ct.id;
+    if(ct.createdEp) pushEvent(ct.createdEp,"container",ct.score,"container "+cn+" created ["+trunc(ct.image||ct.imageRef||"",40)+"] (inspect-derived state)",ct.engine+" inspect",ct.tags);
+    if(ct.startedEp&&ct.startedEp!==ct.createdEp) pushEvent(ct.startedEp,"container",ct.score,"container "+cn+" last started (inspect-derived state)",ct.engine+" inspect",ct.tags);
+    if(ct.finishedEp) pushEvent(ct.finishedEp,"container",ct.score,"container "+cn+" exited"+(ct.exitCode!=null?(" (code "+ct.exitCode+")"):"")+(ct.oom?" OOM-killed":"")+" (inspect-derived state)",ct.engine+" inspect",ct.tags);
+  }
   EVENTS.sort(function(a,b){ return a.epoch-b.epoch; });
 }
 function pkgEpoch(p){ var m=String(p.when).match(/(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})/);   // apt/dpkg logs are host-local
@@ -3930,7 +4532,14 @@ function rescoreAll(){
   correlatePersistence();   // v1.8: persistence entry -> running process -> established public socket
   for(i=0;i<CONTAINERS.length;i++){ r=CONTAINERS[i]; r.tags=[]; r.reasons=[]; r.score=0;
     h=iocHit(r.blob); if(h){ r.score+=3; r.tags.push("IOC"); r.reasons.push("IOC hit: "+h); }
-    if(r.deep){ for(var dc=0;dc<r.deep.length;dc++){ var cf=r.deep[dc]; r.score+=cf.s; r.tags.push(cf.tag); r.reasons.push(cf.reason); } } }
+    if(r.deep){ for(var dc=0;dc<r.deep.length;dc++){ var cf=r.deep[dc]; r.score+=cf.s; r.tags.push(cf.tag); r.reasons.push(cf.reason); } }
+    // v1.9: inspect State.Pid -> host process correlation (the strongest available join)
+    if(r.pid && PROCSCORE[r.pid]!=null && PROCSCORE[r.pid]>=3){
+      r.score+=2; r.tags.push("CTR-SUSPROC"); r.reasons.push("the container's host process (pid "+r.pid+") is itself flagged suspicious on the Processes tab"); }
+    // v1.9: a restart policy alone is routine ops - it only scores when the container already
+    // looks suspicious for other reasons (ChatGPT-review guidance: low persistence score at most)
+    if((r.restartPolicy==="always"||r.restartPolicy==="unless-stopped") && r.score>=3){
+      r.score+=1; r.tags.push("CTR-PERSIST"); r.reasons.push("restart policy '"+r.restartPolicy+"' keeps this already-suspicious container alive across reboots (container-native persistence)"); } }
   buildEvents();   // v0.6: rebuild the unified timeline once scores are final
 }
 /* v1.7: known Linux implant / RAT / C2 framework / coin-miner names, matched anywhere in a
@@ -4769,13 +5378,14 @@ function renderLateral(){
 /* ---------- tab / render dispatch ---------- */
 function setTab(t, quiet){
   TAB=t;
-  var ids={overview:"tabOverview",security:"tabSecurity",inv:"tabInv",proc:"tabProc",net:"tabNet",logon:"tabLogon",users:"tabUsers",ssh:"tabSsh",persist:"tabPersist",time:"tabTime",events:"tabEvents",web:"tabWeb",audit:"tabAudit",actions:"tabActions",apps:"tabApps",browser:"tabBrowser",logs:"tabLogs",ioc:"tabIoc"};
+  var ids={overview:"tabOverview",security:"tabSecurity",inv:"tabInv",proc:"tabProc",net:"tabNet",logon:"tabLogon",users:"tabUsers",ssh:"tabSsh",persist:"tabPersist",time:"tabTime",events:"tabEvents",ctr:"tabCtr",web:"tabWeb",audit:"tabAudit",actions:"tabActions",apps:"tabApps",browser:"tabBrowser",logs:"tabLogs",ioc:"tabIoc"};
   for(var k in ids){ if(ids.hasOwnProperty(k)){ $(ids[k]).className=(k===t)?"btn on":"btn"; } }
   var isOv=(t==="overview"), isLogs=(t==="logs"), isEv=(t==="events");
-  var isPersist=(t==="persist"), isApps=(t==="apps"), isBrowser=(t==="browser"), isSec=(t==="security");
+  var isPersist=(t==="persist"), isApps=(t==="apps"), isBrowser=(t==="browser"), isSec=(t==="security"), isCtr=(t==="ctr");
   showEl("ovCard",isOv); showEl("logsCard",isLogs); showEl("eventsCard",isEv);
   showEl("persistCard",isPersist); showEl("appsCard",isApps); showEl("browserCard",isBrowser); showEl("secCard",isSec);
-  showEl("tblCard", !isOv && !isLogs && !isEv && !isPersist && !isApps && !isBrowser && !isSec);
+  showEl("ctrCard",isCtr);   // v1.9
+  showEl("tblCard", !isOv && !isLogs && !isEv && !isPersist && !isApps && !isBrowser && !isSec && !isCtr);
   showEl("dateWrap", t==="time" || t==="logon" || t==="web" || t==="audit" || t==="actions");
   showEl("tzWrap", t==="time" || t==="logon" || t==="web" || t==="audit" || t==="users" || t==="actions");   // v0.16: Users has last-login times; v1.2: Actions has command times
   showEl("actFilters", t==="actions");   // v1.2
@@ -4827,6 +5437,7 @@ function render(){
   if(TAB==="persist"){ renderPersistTab(); return; }
   if(TAB==="apps"){ renderAppsTab(); return; }
   if(TAB==="browser"){ renderBrowserTab(); return; }
+  if(TAB==="ctr"){ renderCtrTab(); return; }   // v1.9
   if(TAB==="proc") renderProc();
   else if(TAB==="net") renderNet();
   else if(TAB==="logon") renderLogon();
@@ -4893,6 +5504,8 @@ function renderOverview(){
   if(EVENTS.length) s+=statCard(nf(EVENTS.length),"timeline events","");
   if(CONFIGDRIFT.length) s+=statCard(nf(CONFIGDRIFT.length),"config drift",CONFIGDRIFT.length?"warn":"");
   if(BROWSERDBS.length) s+='<span class="stat" data-gotab="browser" style="cursor:pointer" title="Click to open the Browser tab (SQLECmd hand-off)"><span class="n">'+nf(BROWSERDBS.length)+'</span><span class="l">browser DBs</span></span>';
+  if(CONTAINERS.length){ var ctf=flaggedCount(CONTAINERS);
+    s+='<span class="stat'+(ctf?" flag":"")+'" data-gotab="ctr" style="cursor:pointer" title="Click to open the Containers tab (coverage, runtime metadata, inspect deep-dive, docker diff)"><span class="n">'+nf(CONTAINERS.length)+'</span><span class="l">containers</span></span>'; }
   if(META.failed) s+=statCard(nf(META.failed),"failed cmds","warn");
   $("ovStats").innerHTML=s;
   // v0.15: top external talkers (connections + logons + web requests per public IP)
@@ -5027,10 +5640,10 @@ function renderPersistGrid(){
   }
   ph+="</tbody>"; $("pTbl").innerHTML=ph; setupColResizeFor($("pTbl"),"ov_persist"); freezeById("pTbl");
 }
-/* v0.13: Apps tab (package installs + containers - moved off the Overview) */
+/* v0.13: Apps tab (package installs; v1.9: containers moved to their own tab) */
 function renderAppsTab(){
-  renderPackages(); renderContainers();
-  showEl("appsNone", !PKGS.length && !CONTAINERS.length);
+  renderPackages();
+  showEl("appsNone", !PKGS.length);
 }
 /* v0.13: Browser tab (browser DBs + SQLECmd hand-off - moved off the Overview) */
 function renderBrowserTab(){
@@ -5278,19 +5891,272 @@ function renderPackages(){
   var pfCount=(susOnly2||urOnly||mdSet("pkgAct"))?(nf(PLIST.length)+" of "+nf(PKGS.length)+" package rows shown"):(nf(PKGS.length)+" package row"+(PKGS.length===1?"":"s"));
   try{ $("pkgWinLbl").innerHTML+=' <span class="muted" style="font-size:11px">('+esc(pfCount)+')</span>'; }catch(epc){}
 }
-function renderContainers(){
-  showEl("ctrWrap", CONTAINERS.length>0);
-  if(!CONTAINERS.length){ $("ctrTbl").innerHTML=""; return; }
-  var h='<thead><tr><th title="Container runtime (docker / podman / ...) - tags flag privileged / host-ns / sensitive mounts">Engine</th>'
-    +'<th title="Image the container runs">Image</th>'
-    +'<th title="Container entry command">Command</th>'
-    +'<th title="Runtime status at collection">Status</th>'
-    +'<th title="Container name(s)">Name</th></tr></thead><tbody>';
-  for(var i=0;i<CONTAINERS.length;i++){ var c=CONTAINERS[i]; var rc=rowCls(c);
-    h+='<tr'+(rc?(' class="'+rc+'"'):'')+'><td class="mono'+(rc?' first':'')+'">'+esc(c.engine)+tagsHtml(c)+'</td>'
-      +'<td class="mono" title="'+esc(c.image)+'">'+esc(trunc(c.image,28))+'</td><td class="mono muted" title="'+esc(c.cmd)+'">'+esc(trunc(c.cmd,26))+'</td>'
-      +'<td class="mono muted">'+esc(trunc(c.status,20))+'</td><td class="mono">'+esc(c.names)+'</td></tr>'; }
-  h+="</tbody>"; $("ctrTbl").innerHTML=h; setupColResizeFor($("ctrTbl"),"ov_ctr"); freezeById("ctrTbl");
+/* ============ v1.9 - Containers tab renderers ============ */
+var CTR_STATUS_CHIP={present:'<span class="tag ok">present</span>', partial:'<span class="tag info">partial</span>',
+  absent:'<span class="tag" style="opacity:.7">absent</span>', denied:'<span class="tag sus">permission denied</span>',
+  failed:'<span class="tag sus">command failed</span>', na:'<span class="tag" style="opacity:.7">not collected</span>'};
+function renderCtrTab(){
+  var hasAny=!!(CTRX&&CTRX.any);
+  showEl("ctrNone", !hasAny);
+  if(!hasAny && $("ctrNone")){
+    $("ctrNone").innerHTML=(CTRX&&CTRX.dirPresent)
+      ? "The containers artifact group was collected, but no container runtime (docker / podman / LXD) is installed on this host - nothing further to analyze."
+      : "The live_response/containers artifact group is not in this capture - this collection profile did not gather container state. Absence of evidence here is NOT evidence that the host ran no containers; recollect with a profile that includes live_response if containers matter to the case.";
+  }
+  renderCtrCoverage(); renderCtrRuntime(); renderCtrInventory(); renderCtrDetail();
+}
+function renderCtrCoverage(){
+  var rows=(CTRX&&CTRX.coverage)?CTRX.coverage:[];
+  var h='<thead><tr><th title="Evidence family in live_response/containers">Evidence</th>'
+    +'<th title="present = parsed; partial = only some containers have the file; permission denied / command failed = the collector ran but the runtime refused; absent = the runtime or artifact was not there; not collected = the profile skipped the group">Status</th>'
+    +'<th title="Counts and coverage notes">Detail</th>'
+    +'<th title="Open the raw collected file in Explorer">Raw file</th></tr></thead><tbody>';
+  if(!rows.length) h+='<tr><td colspan="4" class="muted">Analyze a capture first.</td></tr>';
+  for(var i=0;i<rows.length;i++){ var r=rows[i];
+    var warn=(r.status==="denied"||r.status==="failed");
+    h+='<tr'+(warn?' class="row-warn"':'')+'><td class="mono">'+esc(r.ev)+'</td>'
+      +'<td>'+(CTR_STATUS_CHIP[r.status]||esc(r.status))+'</td>'
+      +'<td class="mono muted" title="'+esc(r.detail)+'">'+esc(trunc(r.detail,160))+'</td>'
+      +'<td class="mono">'+(r.path?('<span class="lnk" data-open="'+esc(r.path)+'" title="Open the containing folder in Explorer (file selected)">open folder</span>'):'<span class="muted">-</span>')+'</td></tr>'; }
+  h+="</tbody>"; $("ctrCovTbl").innerHTML=h; setupColResizeFor($("ctrCovTbl"),"ctr_cov"); freezeById("ctrCovTbl");
+}
+function ctrRtVal(rt,f){ if(!rt) return ""; return rt[f]||""; }
+function renderCtrRuntime(){
+  var d=CTRX?CTRX.docker:null, p=CTRX?CTRX.podman:null;
+  var dOn=!!(d&&d.installed), pOn=!!(p&&p.installed);
+  showEl("ctrRtWrap", dOn||pOn||!!(CTRX&&CTRX.lxc&&CTRX.lxc.installed));
+  if(!dOn&&!pOn&&!(CTRX&&CTRX.lxc&&CTRX.lxc.installed)){ $("ctrRtTbl").innerHTML=""; return; }
+  var h='<thead><tr><th>Field</th>'+(dOn?'<th>Docker</th>':'')+(pOn?'<th>Podman</th>':'')+'</tr></thead><tbody>';
+  function row(label, df, pf, tip, warnFn){
+    var dv=dOn?String(df||""):"", pv=pOn?String(pf||""):"";
+    if(dv===""&&pv==="") return;
+    var warn=warnFn?warnFn(dv,pv):false;
+    h+='<tr'+(warn?' class="row-warn"':'')+'><td class="mono muted"'+(tip?(' title="'+esc(tip)+'"'):'')+'>'+esc(label)+'</td>'
+      +(dOn?('<td class="mono" title="'+esc(dv)+'">'+esc(trunc(dv,90))+'</td>'):'')
+      +(pOn?('<td class="mono" title="'+esc(pv)+'">'+esc(trunc(pv,90))+'</td>'):'')+'</tr>';
+  }
+  row("Server / client version", d?trimStr((d.server?("server "+d.server):"")+(d.client?("  client "+d.client):"")):"", p?trimStr((p.server?("server "+p.server):"")+(p.client?("  client "+p.client):"")):"", "Engine versions from info/version output");
+  row("containerd / runc", d?trimStr((d.containerd?("containerd "+d.containerd):"")+(d.runc?("  runc "+d.runc):"")):"", "", "Component versions from docker version");
+  row("OS / architecture", d?trimStr((d.os||"")+(d.arch?(" / "+d.arch):"")):"", p?trimStr((p.os||"")+(p.arch?(" / "+p.arch):"")):"");
+  row("Kernel", ctrRtVal(d,"kernel"), ctrRtVal(p,"kernel"));
+  row("Storage driver", d?trimStr((d.storage||"")+(d.backingFs?(" ("+d.backingFs+")"):"")):"", ctrRtVal(p,"storage"), "Where and how image layers/container filesystems are stored");
+  row("Logging driver", ctrRtVal(d,"logging"), ctrRtVal(p,"logging"), "json-file keeps per-container logs under the root dir; none/remote drivers mean no local container logs to collect");
+  row("Cgroup driver / version", d?trimStr((d.cgroupDrv||"")+(d.cgroupVer?(" v"+d.cgroupVer):"")):"", p?trimStr((p.cgroupDrv||"")+(p.cgroupVer?(" v"+p.cgroupVer):"")):"");
+  row("Root dir", ctrRtVal(d,"rootDir"), ctrRtVal(p,"rootDir"), "Image/container storage location - a non-standard path is worth verifying",
+    function(dv){ return dOn&&dv&&dv!=="/var/lib/docker"; });
+  row("Security options", d?(d.secOpts.join(", ")+(d.seccompProfile?(" (seccomp profile: "+d.seccompProfile+")"):"")):"", p?p.secOpts.join(", "):"", "AppArmor/SELinux/seccomp support at the daemon level",
+    function(dv,pv){ var v=lc(dv+" "+pv); return (dOn||pOn)&&v.indexOf("apparmor")<0&&v.indexOf("selinux")<0; });
+  row("Live restore", ctrRtVal(d,"liveRestore"), "", "Containers keep running while the daemon restarts");
+  row("Swarm", ctrRtVal(d,"swarm"), "", "Swarm orchestration state", function(dv){ return /^active$/i.test(dv); });
+  row("Firewall backend", ctrRtVal(d,"firewall"), "");
+  row("HTTP/HTTPS proxy", d?trimStr((d.httpProxy||"")+" "+(d.httpsProxy||"")):"", p?trimStr((p.httpProxy||"")+" "+(p.httpsProxy||"")):"", "Daemon egress proxy - image pulls and API calls route through it", function(dv,pv){ return trimStr(dv+pv)!==""; });
+  row("Insecure registries", d?d.insecureReg.join(", "):"", p?p.insecureReg.join(", "):"", "Plain-HTTP / unverified-TLS registries; loopback entries are the docker default",
+    function(dv,pv){ return /[0-9a-z]/i.test(String(dv+pv).replace(/127\.0\.0\.0\/8|::1\/128|[,\s]/g,"")); });
+  row("Registry mirrors", d?d.mirrors.join(", "):"", p?p.mirrors.join(", "):"", "Images may be pulled from a non-default source", function(dv,pv){ return trimStr(dv+pv)!==""; });
+  row("Containers", d?trimStr((d.total||"")+(d.running!==""?(" ("+d.running+" running, "+(d.paused||0)+" paused, "+(d.stopped||0)+" stopped)"):"")):"", p?p.total:"", "Counts as reported by the runtime at collection");
+  row("Images", ctrRtVal(d,"images"), ctrRtVal(p,"images"));
+  row("CPUs / memory", d?trimStr((d.cpus||"")+(d.mem?(" / "+d.mem):"")):"", p?trimStr((p.cpus||"")+(p.mem?(" / "+p.mem):"")):"", "Resources available to the runtime");
+  if(CTRX&&CTRX.lxc&&CTRX.lxc.installed){
+    h+='<tr><td class="mono muted" title="LXD system-container state from the lxc_* artifacts">LXD/LXC</td><td class="mono" colspan="'+((dOn?1:0)+(pOn?1:0))+'">server '+esc(CTRX.lxc.version||"?")+' · '+nf(CTRX.lxc.instances)+' instance(s)'+(CTRX.lxc.warnings.length?(' · '+nf(CTRX.lxc.warnings.length)+' warning(s)'):'')+'</td></tr>';
+  }
+  // runtime-level findings roll-up
+  if(CTRX&&CTRX.rtFindings.length){
+    for(var f=0;f<CTRX.rtFindings.length;f++){ var rf=CTRX.rtFindings[f];
+      h+='<tr class="'+(rf.s>=2?"row-warn":"")+'"><td class="mono muted">finding</td><td class="mono" colspan="'+((dOn?1:0)+(pOn?1:0))+'"><span class="tag sus">'+esc(rf.tag)+'</span> '+esc(rf.reason)+'</td></tr>'; }
+  }
+  h+="</tbody>"; $("ctrRtTbl").innerHTML=h; setupColResizeFor($("ctrRtTbl"),"ctr_rt"); freezeById("ctrRtTbl");
+}
+function renderCtrInventory(){
+  showEl("ctrInvWrap", CONTAINERS.length>0);
+  if(!CONTAINERS.length){ $("ctrInvTbl").innerHTML=""; showEl("ctrSelWrap",false); return; }
+  var h='<thead><tr><th title="Suspicion score + tags (privileged / host-ns / docker.sock / sensitive mounts / diff implants / C2 lens)">Score</th>'
+    +'<th title="Container runtime">Engine</th>'
+    +'<th title="Container ID (short)">ID</th>'
+    +'<th title="Container name">Name</th>'
+    +'<th title="Image the container was created from">Image</th>'
+    +'<th title="Entry command from the listing">Command</th>'
+    +'<th title="Created - exact (UTC/host TZ) when inspect is present, else the listing\'s relative age">Created</th>'
+    +'<th title="Runtime status at collection - stopped containers stay listed (failed malware execution / terminated tooling)">Status</th>'
+    +'<th title="Published ports (host->container)">Ports</th>'
+    +'<th title="Container rw-layer size from the listing">Size</th>'
+    +'<th title="Host PID of the container init process at collection (from inspect State.Pid) - click to open the process">PID</th>'
+    +'<th title="Deep artifacts available for this container">Inspect / Diff</th></tr></thead><tbody>';
+  for(var i=0;i<CONTAINERS.length;i++){ var c=CONTAINERS[i]; var rc=rowCls(c); var selCls=(i===CTR_SEL)?" sel":"";
+    var pidCell=c.pid?(PROCBYPID[c.pid]?('<span class="lnk" data-pid="'+c.pid+'" title="Open this process\'s detail (Processes tab data)">'+c.pid+'</span>'):('<span title="PID from inspect - not present in the collected process list (container may have restarted between commands)">'+c.pid+'</span>')):'-';
+    h+='<tr class="'+(rc||"")+selCls+'" data-ctr="'+i+'" style="cursor:pointer" title="Click for the inspect deep-dive">'
+      +scoreCell(c)
+      +'<td class="mono">'+esc(c.engine)+'</td>'
+      +'<td class="mono muted">'+esc(c.id)+'</td>'
+      +'<td class="mono">'+esc(c.names||"-")+'</td>'
+      +'<td class="mono" title="'+esc(c.image||c.imageRef)+'">'+esc(trunc(c.image||c.imageRef||"-",30))+'</td>'
+      +'<td class="mono muted" title="'+esc(c.cmd)+'">'+esc(trunc(c.cmd||"-",22))+'</td>'
+      +'<td class="mono muted" title="'+esc(c.created||"")+'">'+(c.createdEp?esc(fmtTime(c.createdEp,false)):esc(c.created||"-"))+'</td>'
+      +'<td class="mono'+(c.running?'':' muted')+'">'+esc(trunc(c.status||"-",24))+'</td>'
+      +'<td class="mono muted" title="'+esc(c.ports||"")+'">'+esc(trunc(c.ports||"-",26))+'</td>'
+      +'<td class="mono muted">'+esc(c.size||"-")+'</td>'
+      +'<td class="mono">'+pidCell+'</td>'
+      +'<td class="mono muted">'+(c.inspected?"inspect":"")+(c.inspected&&c.diff?" + ":"")+(c.diff?"diff":"")+((!c.inspected&&!c.diff)?"-":"")+'</td></tr>'; }
+  h+="</tbody>"; $("ctrInvTbl").innerHTML=h; setupColResizeFor($("ctrInvTbl"),"ctr_inv"); freezeById("ctrInvTbl");
+}
+function ctrKv(k,v,tip,warn){ if(v==null||v==="") return "";
+  return '<tr'+(warn?' class="row-warn"':'')+'><td class="mono muted" style="width:210px"'+(tip?(' title="'+esc(tip)+'"'):'')+'>'+esc(k)+'</td><td class="mono">'+v+'</td></tr>'; }
+function ctrEpLink(ep, label){ if(!ep) return "";
+  return '<span class="lnk" data-ep="'+ep+'" title="Click: pivot the Timeline ±15 min around this moment">'+esc(fmtTime(ep,true))+' '+esc(tzLabel())+'</span>'+(label?(' <span class="muted">'+esc(label)+'</span>'):""); }
+function renderCtrDetail(){
+  var ok=(CTR_SEL>=0&&CTR_SEL<CONTAINERS.length);
+  showEl("ctrSelWrap", ok);
+  if(!ok){ if($("ctrSelBody")) $("ctrSelBody").innerHTML=""; return; }
+  var c=CONTAINERS[CTR_SEL], s=[], i;
+  $("ctrSelName").innerHTML=esc((c.names||c.id)+" ("+c.engine+(c.fullId?(" · "+trunc(c.fullId,20)+"…"):"")+")");
+  if(!c.inspected){
+    s.push('<div class="muted" style="font-size:12px">No inspect file for this container - only the listing row above is available. '+(c.diff?'Its docker diff is shown below.':'')+'</div>');
+  } else {
+    // --- lifecycle (inspect-derived point-in-time state) ---
+    s.push('<div class="subhead">Lifecycle evidence <span class="muted" style="font-weight:400;font-size:11px">- inspect-derived point-in-time STATE (docker keeps no collected event history): created/started/finished + restart/health; timestamps click-pivot the Timeline and appear on the Events axis</span></div>');
+    var lt='<table>';
+    lt+=ctrKv("Created", ctrEpLink(c.createdEp));
+    lt+=ctrKv("Last started", ctrEpLink(c.startedEp));
+    lt+=ctrKv("Finished", c.finishedEp?ctrEpLink(c.finishedEp):(c.running?'<span class="muted">still running at collection</span>':""));
+    lt+=ctrKv("State", esc(c.stateStatus||"?")+(c.paused?" (paused)":"")+(c.restarting?" (restarting)":"")+(c.dead?" (dead)":""));
+    if(c.exitCode!=null&&c.exitCode!=="") lt+=ctrKv("Exit code", esc(c.exitCode)+(c.stateErr?(' <span class="tag sus" title="'+esc(c.stateErr)+'">error</span>'):""), "", c.exitCode!=="0"&&!c.running);
+    lt+=ctrKv("OOM killed", c.oom?'<span class="tag sus">yes</span>':"", "Out-of-memory termination - miner / runaway payload tell when unexpected", c.oom);
+    lt+=ctrKv("Restart count / policy", esc(String(c.restartCount||0))+(c.restartPolicy?(" / "+esc(c.restartPolicy)):"")+(c.autoRemove?" (auto-remove)":""), "A restart policy alone is routine ops; it is only scored when the container is already suspicious", c.restartCount>=5);
+    if(c.healthStatus) lt+=ctrKv("Health", esc(c.healthStatus)+(c.healthFails?(" (failing streak "+esc(c.healthFails)+")"):""));
+    if(c.pid) lt+=ctrKv("Host PID at collection", (PROCBYPID[c.pid]?('<span class="lnk" data-pid="'+c.pid+'">'+c.pid+' - view host process</span>'):(c.pid+' <span class="muted">(not in the collected process list)</span>')), "inspect State.Pid -> the host process running this container's init - the strongest container->host join in the capture");
+    if(c.stats) lt+=ctrKv("Resource use at collection", esc("CPU "+(c.stats.cpu||"?")+" · MEM "+(c.stats.mem||"?")+" · NET "+(c.stats.net||"?")+" · IO "+(c.stats.blk||"?")+" · "+(c.stats.pids||"?")+" pids"), "docker stats --no-stream (single point-in-time sample)");
+    lt+='</table>'; s.push('<div class="scroll" style="max-height:26vh">'+lt+'</div>');
+    // --- execution configuration ---
+    s.push('<div class="subhead" style="margin-top:10px">Execution configuration</div>');
+    var xt='<table>';
+    xt+=ctrKv("Entrypoint", esc(c.entrypoint||"-"));
+    xt+=ctrKv("Command", esc(c.cmdCfg||c.cmd||"-"));
+    xt+=ctrKv("User", c.runsRoot?'root <span class="muted">(default - container processes run as host-root unless user-namespaced)</span>':esc(c.user));
+    xt+=ctrKv("Working dir", esc(c.workdir||""));
+    xt+=ctrKv("Container hostname", esc(c.hostname||""));
+    xt+=ctrKv("Image", esc(c.imageRef||c.image||"")+(c.imageId?(' <span class="muted">'+esc(trunc(c.imageId,25))+'…</span>'):""));
+    if(c.composeProject||c.composeService) xt+=ctrKv("Compose", esc(trimStr((c.composeProject||"")+" / "+(c.composeService||""))), "com.docker.compose.* labels");
+    if(c.stopSignal) xt+=ctrKv("Stop signal", esc(c.stopSignal));
+    if(c.healthCmd) xt+=ctrKv("Health-check command", esc(trunc(c.healthCmd,140)), "Runs on a schedule inside the container - a network-capable health check is beacon-shaped");
+    var il=[]; if(c.labels){ var lk; for(lk in c.labels){ if(c.labels.hasOwnProperty(lk)&&/^org\.opencontainers\.image\.(source|version|created|title)$/.test(lk)) il.push(lk.replace("org.opencontainers.image.","")+"="+c.labels[lk]); } }
+    if(il.length) xt+=ctrKv("Image provenance labels", esc(trunc(il.join(" · "),160)), "Self-declared OCI labels - provenance claims, not verification");
+    xt+='</table>'; s.push('<div class="scroll" style="max-height:26vh">'+xt+'</div>');
+    // --- environment (redacted by default) ---
+    if(c.env&&c.env.length){
+      s.push('<div class="subhead" style="margin-top:10px">Environment <span class="muted" style="font-weight:400;font-size:11px">- '+c.env.length+' variable(s); values redacted unless the value itself is an indicator (LD_PRELOAD / endpoint / temp path / URL) or "Show env values" is ticked</span></div>');
+      var et='<table><thead><tr><th style="width:230px">Name</th><th>Value</th></tr></thead><tbody>';
+      for(i=0;i<c.env.length;i++){ var ev=c.env[i]; var show=CTR_ENV_SHOW||!!ev.ind;
+        et+='<tr'+(ev.ind&&ev.ind!=="URL value"?' class="row-warn"':'')+'><td class="mono">'+esc(ev.name)+'</td>'
+          +'<td class="mono muted">'+(show?esc(trunc(ev.val,150)):'&lt;redacted&gt;')+(ev.ind?(' <span class="tag '+(ev.ind==="URL value"?"info":"sus")+'">'+esc(ev.ind)+'</span>'):'')+'</td></tr>'; }
+      et+='</tbody></table>'; s.push('<div class="scroll" style="max-height:22vh">'+et+'</div>');
+    }
+    // --- isolation & host exposure ---
+    s.push('<div class="subhead" style="margin-top:10px">Isolation &amp; host exposure <span class="muted" style="font-weight:400;font-size:11px">- combinations score harder than single settings</span></div>');
+    var ft='<table>';
+    var expo=[]; for(i=0;i<c.deep.length;i++){ var df=c.deep[i];
+      expo.push('<tr'+(df.s>=3?' class="row-flag"':(df.s>=2?' class="row-warn"':''))+'><td class="mono" style="width:70px"><span class="sc '+scClass(df.s)+'">'+df.s+'</span> <span class="tag sus">'+esc(df.tag)+'</span></td><td class="mono">'+esc(df.reason)+'</td></tr>'); }
+    if(expo.length) s.push('<div class="scroll" style="max-height:24vh"><table>'+expo.join("")+'</table></div>');
+    else s.push('<div class="ok" style="font-size:12px">No isolation/exposure findings - not privileged, no host namespaces, no docker.sock or sensitive mounts, no dangerous capabilities, confinement intact.</div>');
+    ft+=ctrKv("Network mode", esc(c.netMode||""));
+    ft+=ctrKv("Capabilities added", esc((c.capAdd&&c.capAdd.length)?c.capAdd.join(", "):"none"));
+    ft+=ctrKv("SecurityOpt", esc((c.securityOpt&&c.securityOpt.length)?c.securityOpt.join(", "):"(defaults)"));
+    ft+=ctrKv("AppArmor profile", esc(c.apparmor||""));
+    ft+=ctrKv("no-new-privileges", c.noNewPrivileges?"set":"not set");
+    ft+=ctrKv("Read-only rootfs", c.readonlyRootfs?"yes":"no");
+    ft+='</table>'; s.push('<div class="scroll" style="max-height:20vh;margin-top:6px">'+ft+'</div>');
+    // --- mounts & network ---
+    s.push('<div class="subhead" style="margin-top:10px">Mounts &amp; network</div>');
+    if(c.mounts&&c.mounts.length){
+      var mt2='<table><thead><tr><th>Type</th><th>Host source</th><th>Destination</th><th>RW</th><th>Propagation</th><th title="Search the bodyfile Timeline for the host source path - a recently modified host file mounted into a container is a pivot lead">Timeline</th></tr></thead><tbody>';
+      for(i=0;i<c.mounts.length;i++){ var m=c.mounts[i];
+        mt2+='<tr><td class="mono muted">'+esc(m.type||"")+'</td><td class="mono" title="'+esc(m.src||m.name)+'">'+esc(trunc(m.src||m.name||"",60))+'</td>'
+          +'<td class="mono">'+esc(trunc(m.dst,40))+'</td><td class="mono muted">'+(m.rw?"rw":"ro")+'</td><td class="mono muted">'+esc(m.prop||"")+'</td>'
+          +'<td>'+(m.src?('<span class="lnk" data-qtab="time" data-q="'+esc(m.src)+'">find in Timeline</span>'):'-')+'</td></tr>'; }
+      mt2+='</tbody></table>'; s.push('<div class="scroll" style="max-height:20vh">'+mt2+'</div>');
+    } else s.push('<div class="muted" style="font-size:12px">No mounts.</div>');
+    var nt='<table>';
+    nt+=ctrKv("Container IP / MAC", esc(trimStr((c.ip||"")+(c.mac?("  "+c.mac):""))));
+    nt+=ctrKv("Gateway", esc(c.gateway||""));
+    nt+=ctrKv("Networks", esc((c.networks&&c.networks.length)?c.networks.join(", "):""));
+    if(c.pubPorts&&c.pubPorts.length){ var pp=[], q;
+      for(q=0;q<c.pubPorts.length;q++){ var P=c.pubPorts[q];
+        if(P.hostPort){ var corr=ctrPortCorrob(P.hostPort);
+          pp.push(esc((P.hostIp||"?")+":"+P.hostPort+" -> "+P.port)+(corr?' <span class="tag ok" title="A LISTEN socket on this port is present in the host ss/netstat data - corroboration that the publish was live, NOT proof of which process owned any given connection">host listener seen</span>':' <span class="tag info" title="No LISTEN socket on this port in the host socket data - the publish may route via the docker-proxy/iptables path that ss attributes differently, or collection raced">no host listener match</span>')); }
+        else pp.push(esc(P.port+" (exposed, not published)")); }
+      nt+=ctrKv("Ports", pp.join("<br>"), "Cross-referenced against the host Network tab as corroboration only"); }
+    nt+='</table>'; s.push('<div class="scroll" style="max-height:20vh;margin-top:6px">'+nt+'</div>');
+    // --- in-container processes (docker top: HOST pids) ---
+    if(c.topProcs&&c.topProcs.length){
+      s.push('<div class="subhead" style="margin-top:10px">In-container processes at collection <span class="muted" style="font-weight:400;font-size:11px">- docker top: PIDs are HOST pids; click one to open the host process row</span></div>');
+      var tt='<table><thead><tr><th>UID</th><th>PID (host)</th><th>PPID</th><th>STIME</th><th>CMD</th></tr></thead><tbody>';
+      for(i=0;i<c.topProcs.length&&i<60;i++){ var tp=c.topProcs[i];
+        tt+='<tr><td class="mono muted">'+esc(tp.uid)+'</td>'
+          +'<td class="mono">'+(PROCBYPID[tp.pid]?('<span class="lnk" data-pid="'+esc(tp.pid)+'">'+esc(tp.pid)+'</span>'):esc(tp.pid))+'</td>'
+          +'<td class="mono muted">'+esc(tp.ppid)+'</td><td class="mono muted">'+esc(tp.stime)+'</td>'
+          +'<td class="mono" title="'+esc(tp.cmd)+'">'+esc(trunc(tp.cmd,110))+'</td></tr>'; }
+      if(c.topProcs.length>60) tt+='<tr><td colspan="5" class="muted">'+nf(c.topProcs.length-60)+' more not shown.</td></tr>';
+      tt+='</tbody></table>'; s.push('<div class="scroll" style="max-height:24vh">'+tt+'</div>');
+    }
+  }
+  // --- filesystem changes (docker diff) ---
+  if(c.diff&&c.diff.present){
+    var d=c.diff;
+    s.push('<div class="subhead" style="margin-top:10px">Filesystem changes (docker diff) <span class="muted" style="font-weight:400;font-size:11px">- '+nf(d.added)+' added / '+nf(d.changed)+' changed / '+nf(d.deleted)+' deleted vs the image; path + change type ONLY - the capture holds no contents, ownership or hashes for these paths</span></div>');
+    var tops=[], tk; for(tk in d.byTop){ if(d.byTop.hasOwnProperty(tk)) tops.push({t:tk,n:d.byTop[tk]}); }
+    tops.sort(function(a,b){ return b.n-a.n; });
+    var chips=[]; for(i=0;i<tops.length&&i<12;i++) chips.push('<span class="tag info">'+esc(tops[i].t)+' '+nf(tops[i].n)+'</span>');
+    if(chips.length) s.push('<div style="font-size:11px;margin:4px 0">'+chips.join(" ")+'</div>');
+    var rows2=[], shownN=0;
+    for(i=0;i<d.rows.length;i++){ var dr=d.rows[i];
+      if(CTR_DIFF_SUS&&!dr.s) continue;
+      rows2.push(dr); }
+    rows2.sort(function(a,b){ return b.s-a.s; });
+    var dt='<table><thead><tr><th style="width:46px" title="A = added, C = changed, D = deleted (vs the image layers)">Type</th><th>Path (inside the container)</th><th>Why flagged</th></tr></thead><tbody>';
+    var cap=CTR_DIFF_SUS?2000:1000;
+    for(i=0;i<rows2.length&&i<cap;i++){ var r2=rows2[i];
+      dt+='<tr'+(r2.s>=3?' class="row-flag"':(r2.s>=2?' class="row-warn"':''))+'><td class="mono">'+esc(r2.t)+'</td>'
+        +'<td class="mono" title="'+esc(r2.path)+'">'+esc(trunc(r2.path,120))+'</td>'
+        +'<td class="mono muted">'+esc(r2.why||"")+'</td></tr>'; shownN++; }
+    if(rows2.length>shownN) dt+='<tr><td colspan="3" class="ioc">⚠ '+nf(rows2.length-shownN)+' more row(s) not rendered - use "Suspicious diff paths only" or Export → CSV for the full set.</td></tr>';
+    if(!rows2.length) dt+='<tr><td colspan="3" class="'+(CTR_DIFF_SUS?"ok":"muted")+'">'+(CTR_DIFF_SUS?"No suspicious diff paths for this container.":"No diff rows.")+'</td></tr>';
+    dt+='</tbody></table>'; s.push('<div class="scroll" style="max-height:34vh">'+dt+'</div>');
+    if(d.capped) s.push('<div class="muted" style="font-size:11px">Diff parse capped at '+nf(CTR_DIFF_ROWCAP)+' stored rows.</div>');
+  } else if(c.inspected){
+    s.push('<div class="muted" style="font-size:12px;margin-top:8px">No docker diff file for this container - filesystem-change analysis unavailable.</div>');
+  }
+  // --- raw files ---
+  var raw=[];
+  if(c.inspPath) raw.push('<span class="lnk" data-open="'+esc(c.inspPath)+'">open inspect file</span>');
+  if(c.diffPath) raw.push('<span class="lnk" data-open="'+esc(c.diffPath)+'">open diff file</span>');
+  if(raw.length) s.push('<div style="font-size:12px;margin-top:8px">'+raw.join(' <span class="muted">·</span> ')+'</div>');
+  $("ctrSelBody").innerHTML=s.join("");
+}
+/* host-listener corroboration: any LISTEN socket on this host port in the parsed ss/netstat data */
+function ctrPortCorrob(hostPort){
+  for(var i=0;i<NET.length;i++){ var n=NET[i];
+    if(/^LISTEN$/i.test(n.state) && String(n.localPort)===String(hostPort)) return true; }
+  return false;
+}
+function exportContainers(){
+  if(!CTRX){ setStatus("Analyze a capture first.","err"); return; }
+  var L=["Section,Key,Status,Detail"], i, j;
+  for(i=0;i<CTRX.coverage.length;i++){ var cv=CTRX.coverage[i]; L.push(["coverage",cq(cv.ev),cq(cv.status),cq(cv.detail)].join(",")); }
+  for(i=0;i<CTRX.rtFindings.length;i++){ var rf=CTRX.rtFindings[i]; L.push(["runtime-finding",cq(rf.tag),cq(rf.s),cq(rf.reason)].join(",")); }
+  L.push("");
+  L.push("Engine,ID,Name,Image,Command,Created_"+tzLabel()+",Started,Finished,Status,ExitCode,OOM,RestartPolicy,RestartCount,HostPID,User,Ports,Privileged/Tags,Score,Reasons");
+  for(i=0;i<CONTAINERS.length;i++){ var c=CONTAINERS[i];
+    L.push([cq(c.engine),cq(c.id),cq(c.names),cq(c.image||c.imageRef),cq(c.cmdCfg||c.cmd),
+      cq(c.createdEp?fmtTime(c.createdEp,true):c.created),cq(c.startedEp?fmtTime(c.startedEp,true):""),cq(c.finishedEp?fmtTime(c.finishedEp,true):""),
+      cq(c.status),cq(c.exitCode==null?"":c.exitCode),cq(c.oom?"yes":""),cq(c.restartPolicy||""),cq(c.restartCount||0),cq(c.pid||""),
+      cq(c.user||(c.inspected?"root":"")),cq(c.ports),cq(c.tags.join(";")),cq(c.score),cq(c.reasons.join(" | "))].join(",")); }
+  var anyDiff=false;
+  for(i=0;i<CONTAINERS.length;i++){ if(CONTAINERS[i].diff&&CONTAINERS[i].diff.rows.length){ anyDiff=true; break; } }
+  if(anyDiff){ L.push(""); L.push("Container,ChangeType,Path,WhyFlagged,Score");
+    for(i=0;i<CONTAINERS.length;i++){ var cc=CONTAINERS[i]; if(!cc.diff) continue;
+      for(j=0;j<cc.diff.rows.length;j++){ var dr2=cc.diff.rows[j];
+        L.push([cq(cc.names||cc.id),cq(dr2.t),cq(dr2.path),cq(dr2.why),cq(dr2.s)].join(",")); } } }
+  var dir=LASTOUTDIR||$("outDir").value, path=dir+"\\containers_"+nowStamp()+".csv";
+  try{ writeUtf8(path, L.join("\r\n")); setStatus("Exported container evidence → "+path,"ok"); }
+  catch(e){ setStatus("Export failed: "+e.message,"err"); }
 }
 
 /* ============ v1.6 - Security tab: automated correlations + hardening posture ============
@@ -5454,10 +6320,16 @@ function computeSecurity(){
       for(j=0;j<sl2.length;j++){ var sline=trimStr(sl2[j]); if(!sline||sline.charAt(0)==="#") continue;
         if(/NOPASSWD:/i.test(sline) && !/^Defaults/i.test(sline)) nopw.push(trunc(sline,70)); } }
     if(nopw.length) add(PO,"WARN",2,"Sudo: no unrestricted NOPASSWD grants",nf(nopw.length)+" NOPASSWD sudo rule(s), e.g. "+nopw[0]+" - a compromised account escalates without a password.",{tab:"users"}); else add(PO,"PASS",0,"Sudo: no unrestricted NOPASSWD grants","No NOPASSWD grants in sudoers.",{tab:"users"}); }
-  // P9 dangerous containers
-  if(!have(CONTAINERS)) add(PO,"NA",0,"No privileged / host-namespace containers","No running containers (or no container runtime) in this capture.");
-  else { var badC=null; for(i2=0;i2<CONTAINERS.length;i2++){ if(hasTag(CONTAINERS[i2],"PRIVILEGED")||hasTag(CONTAINERS[i2],"HOST-NS")||hasTag(CONTAINERS[i2],"SENS-MOUNT")){ badC=CONTAINERS[i2]; break; } }
-    if(badC) add(PO,"FAIL",3,"No privileged / host-namespace containers","Container '"+trunc(badC.names||badC.image,40)+"' is privileged / shares a host namespace / mounts a sensitive host path - a container-escape surface.",{tab:"apps"}); else add(PO,"PASS",0,"No privileged / host-namespace containers","No running container is privileged or host-namespaced.",{tab:"apps"}); }
+  // P9 dangerous containers (v1.9: docker.sock / capabilities / unconfined join the check; jumps to the Containers tab)
+  if(!have(CONTAINERS)) add(PO,"NA",0,"No privileged / host-namespace containers","No containers (or no container runtime) in this capture.");
+  else { var badC=null; for(i2=0;i2<CONTAINERS.length;i2++){ var cbc=CONTAINERS[i2];
+      if(hasTag(cbc,"PRIVILEGED")||hasTag(cbc,"HOST-NS")||hasTag(cbc,"SENS-MOUNT")||hasTag(cbc,"DOCKER-SOCK")||hasTag(cbc,"CAP-ADD")||hasTag(cbc,"UNCONFINED")){ badC=cbc; break; } }
+    if(badC) add(PO,"FAIL",3,"No privileged / host-namespace containers","Container '"+trunc(badC.names||badC.image,40)+"' is privileged / shares a host namespace / mounts docker.sock or a sensitive host path / adds dangerous capabilities / runs unconfined - a container-escape surface.",{tab:"ctr"}); else add(PO,"PASS",0,"No privileged / host-namespace containers","No container is privileged, host-namespaced, docker.sock-mounted, over-capable or unconfined.",{tab:"ctr"}); }
+  // P9b container runtime hardening (v1.9: insecure registries / odd root dir / missing MAC/seccomp / swarm / proxy)
+  if(!(CTRX&&CTRX.any)) add(PO,"NA",0,"Container runtime configuration reviewed","No container runtime evidence in this capture.");
+  else if(CTRX.rtFindings.length){ var rfTop=CTRX.rtFindings[0];
+    add(PO,"WARN",2,"Container runtime configuration reviewed",nf(CTRX.rtFindings.length)+" runtime-level finding(s), e.g.: "+trunc(rfTop.reason,120)+" - full list on the Containers tab.",{tab:"ctr"}); }
+  else add(PO,"PASS",0,"Container runtime configuration reviewed","No insecure registries, non-standard root dir, missing confinement support, unexpected swarm/proxy or registry mirrors.",{tab:"ctr"});
   // P10 auditd present
   var haveAuditLog=!!firstFile(LASTROOT,["[root]/var/log/audit/audit.log"]);
   var auditProc=false; for(i2=0;i2<PROC.length;i2++){ if(/auditd/.test((PROC[i2].cmd||"")+(PROC[i2].exe||""))){ auditProc=true; break; } }
@@ -6916,13 +7788,45 @@ function generateReport(){
     section("actions","Actions", repTable(["Score","When ("+tzLabel()+")","User","Shell","Command"],
       repRows(_AC, REPORT_ROWCAP, function(r){ return {cls:repCls(r.score), cells:[repScore(r), r.epoch?fmtTime(r.epoch,true):"-", r.user, r.shell, trunc(r.cmd,200)]}; }, true),
       ACTIONSCAP.total?("Executed shell commands from user history ("+nf(ACTIONSCAP.total)+" parsed"+(ACTIONSCAP.total>ACTIONSCAP.shown?(", "+nf(ACTIONSCAP.shown)+" stored"):"")+"; highest-signal shown here)."):""));
-    // --- Apps ---
+    // --- Apps (v1.9: containers moved to their own report section) ---
     var ap=[];
     ap.push('<h3>Recent package activity</h3>'+repTable(["When","Action","Package","Requested by"],
       repRows(_K, 5000, function(r){ return {cls:(r.susp?"warn":""), cells:[r.when, r.action, r.pkg+(r.susp?(" [SUS: "+r.susp+"]"):""), (pkgUserRequested(r)?"[USER-REQ] ":"")+(r.by||"-")]}; })));
-    ap.push('<h3>Containers</h3>'+repTable(["Score","Engine","Image","Command","Status","Name"],
-      repRows(_C, 100, function(r){ return {cls:repCls(r.score), cells:[repScore(r), r.engine, r.image, trunc(r.cmd,60), r.status, r.names]}; }, true)));
     section("apps","Apps", ap.join(""));
+    // --- Containers (v1.9) ---
+    var cs=[];
+    if(CTRX&&CTRX.coverage.length){
+      cs.push('<h3>Collection coverage</h3>'+repTable(["Evidence","Status","Detail"],
+        repRows(CTRX.coverage, 60, function(r){ return {cls:(r.status==="denied"||r.status==="failed")?"warn":"", cells:[r.ev, r.status, trunc(r.detail,180)]}; })));
+    }
+    if(CTRX&&CTRX.any){
+      var rtRows=[], rte;
+      function rtLine(eng,rt){ if(!rt||!rt.installed) return;
+        rtRows.push({cls:"", cells:[eng+" version", trimStr((rt.server?("server "+rt.server):"")+(rt.client?("  client "+rt.client):""))]});
+        if(rt.storage) rtRows.push({cls:"", cells:[eng+" storage / logging", rt.storage+(rt.backingFs?(" ("+rt.backingFs+")"):"")+(rt.logging?(" / "+rt.logging):"")]});
+        if(rt.rootDir) rtRows.push({cls:(eng==="docker"&&rt.rootDir!=="/var/lib/docker")?"warn":"", cells:[eng+" root dir", rt.rootDir]});
+        if(rt.secOpts.length) rtRows.push({cls:"", cells:[eng+" security options", rt.secOpts.join(", ")]});
+        if(rt.total!=="") rtRows.push({cls:"", cells:[eng+" containers / images", rt.total+" ("+rt.running+" running, "+(rt.stopped||0)+" stopped) / "+(rt.images||"?")+" image(s)"]}); }
+      rtLine("docker", CTRX.docker); rtLine("podman", CTRX.podman);
+      for(rte=0;rte<CTRX.rtFindings.length;rte++) rtRows.push({cls:"warn", cells:["finding ["+CTRX.rtFindings[rte].tag+"]", CTRX.rtFindings[rte].reason]});
+      if(CTRX.lxc&&CTRX.lxc.installed) rtRows.push({cls:"", cells:["LXD", "server "+(CTRX.lxc.version||"?")+" · "+nf(CTRX.lxc.instances)+" instance(s)"]});
+      if(rtRows.length) cs.push('<h3>Runtime metadata</h3>'+repTable(["Field","Value"], {rows:rtRows, total:rtRows.length, shown:rtRows.length}));
+      cs.push('<h3>Container inventory</h3>'+repTable(["Score","Engine","ID","Name","Image","Command","Created","Started","Status","Host PID","Ports","Restart policy"],
+        repRows(_C, 200, function(r){ return {cls:repCls(r.score), cells:[repScore(r), r.engine, r.id, r.names, r.image||r.imageRef, trunc(r.cmdCfg||r.cmd,50),
+          r.createdEp?fmtTime(r.createdEp,true):(r.created||"-"), r.startedEp?fmtTime(r.startedEp,true):"-", r.status, r.pid||"-", trunc(r.ports||"-",40), r.restartPolicy||"-"]}; }, true)));
+      var expoRows=[], xc, xd;
+      for(xc=0;xc<CONTAINERS.length;xc++){ var xcc=CONTAINERS[xc];
+        for(xd=0;xd<xcc.reasons.length;xd++) expoRows.push({cls:(xcc.score>=5?"flag":(xcc.score>=3?"warn":"")), cells:[xcc.names||xcc.id, xcc.tags[xd]||"", xcc.reasons[xd]]}); }
+      if(expoRows.length) cs.push('<h3>Exposure &amp; findings</h3>'+repTable(["Container","Tag","Finding"], {rows:expoRows, total:expoRows.length, shown:expoRows.length}));
+      var dfRows=[];
+      for(xc=0;xc<CONTAINERS.length;xc++){ var dcc=CONTAINERS[xc]; if(!dcc.diff||!dcc.diff.present) continue;
+        dfRows.push({cls:"", cells:[dcc.names||dcc.id, nf(dcc.diff.added)+" added / "+nf(dcc.diff.changed)+" changed / "+nf(dcc.diff.deleted)+" deleted", dcc.diff.susN?nf(dcc.diff.susN)+" suspicious path(s) - see the app/CSV for the list":"none flagged"]}); }
+      if(dfRows.length) cs.push('<h3>Filesystem changes (docker diff)</h3>'+repTable(["Container","Changes vs image","Suspicious paths"], {rows:dfRows, total:dfRows.length, shown:dfRows.length},
+        "docker diff records path and change type only - the capture holds no contents, ownership or hashes for these paths, no event history, no container logs and no volume contents."));
+    } else {
+      cs.push('<p class="muted">No container runtime evidence in this capture'+((CTRX&&!CTRX.dirPresent)?' (the containers artifact group was not collected by this profile)':'')+'.</p>');
+    }
+    section("containers","Containers", cs.join(""));
     // --- Browser ---
     section("browser","Browser", repTable(["Browser","User","Database","Size","WAL sidecar"],
       repRows(BROWSERDBS, 100, function(r){ return {cls:"", cells:[r.browser, r.user, r.name, fmtSize(r.size), r.wal?"present":"absent"]}; }),
@@ -7024,6 +7928,7 @@ function init(){
     try{ $("tzMain").checked=on; }catch(e1){} try{ $("tzLogs").checked=on; }catch(e2){} try{ $("evTz").checked=on; }catch(e3){}
     try{ $("tzOv").checked=on; }catch(e4){} try{ $("tzPersist").checked=on; }catch(e5){} try{ $("tzApps").checked=on; }catch(e6){}
     try{ $("tzSec").checked=on; }catch(e7){}   // v1.6
+    try{ $("tzCtr").checked=on; }catch(e8){}   // v1.9
     render(); }
   $("tzMain").onclick=function(){ setTz(this.checked); };
   $("tzLogs").onclick=function(){ setTz(this.checked); };
@@ -7031,6 +7936,11 @@ function init(){
   $("tzPersist").onclick=function(){ setTz(this.checked); };   // v0.16
   $("tzApps").onclick=function(){ setTz(this.checked); };      // v0.16
   $("tzSec").onclick=function(){ setTz(this.checked); };       // v1.6
+  $("tzCtr").onclick=function(){ setTz(this.checked); };       // v1.9
+  $("ctrExport").onclick=exportContainers;                     // v1.9
+  $("ctrSelClose").onclick=function(){ CTR_SEL=-1; renderCtrTab(); };
+  $("ctrEnvShow").onclick=function(){ CTR_ENV_SHOW=this.checked; renderCtrDetail(); };
+  $("ctrDiffSus").onclick=function(){ CTR_DIFF_SUS=this.checked; renderCtrDetail(); };
   $("secExport").onclick=exportSecurity;                       // v1.6
   $("logsExport").onclick=exportLogs;
   $("loadJournal").onclick=loadJournalWsl;
@@ -7125,6 +8035,9 @@ function init(){
     var fold=attrUp(t,"data-fold"); if(fold){ PTREE_COLLAPSED[fold]=!PTREE_COLLAPSED[fold]; renderProcTree(); return; }
     var pep=attrUp(t,"data-ep"); if(pep){ pivotTimeline(pep); return; }   // v0.11: Events When-cell pivot
     var tpid=attrUp(t,"data-pid"); if(tpid){ var pr=PROCBYPID[tpid]; if(pr){ window.__viewRows=[pr]; openRowDetail(0); } return; }
+    // v1.9: Containers tab - row select + "find in Timeline" style query jumps
+    var ctri=attrUp(t,"data-ctr"); if(ctri!=null&&ctri!==""){ CTR_SEL=(CTR_SEL===parseInt(ctri,10))?-1:parseInt(ctri,10); renderCtrTab(); return; }
+    var qtab=attrUp(t,"data-qtab"); if(qtab){ var qv=attrUp(t,"data-q")||""; QUERY=lc(qv); try{ $("q").value=qv; }catch(eq9){} setTab(qtab); return; }
     var n=t; while(n && n.tagName!=="TR"){ n=n.parentNode; if(n&&n.tagName==="TABLE"){ n=null; break; } }
     if(!n||!n.getAttribute) return;
     var pf=n.getAttribute("data-pf");
@@ -7198,6 +8111,7 @@ window.onload=function(){ init(); try{ window.setTimeout(checkSelfUpdate,600); }
       <li><b>Inventory tab</b> - a map of every key artifact (processes, network, logons, accounts, persistence, system, filesystem, logs, containers) showing present/absent, size, and an <b>open folder</b> link that opens the raw file in Explorer. The Persistence &amp; config inventory on Overview has the same open-folder links; click an artifact name there to view its contents inline.</li>
       <li><b>UI (v0.7):</b> the Processes table has a <b>Name</b> column and a <b>Tree view</b> toggle (collapsible parent/child hierarchy - click ▸/▾ to fold, a row for detail). <b>Logons</b> has User / Source / Result filters and a clickable link to each raw source log. <b>Events</b> has a min-score filter and a kind filter. Long tables keep their <b>header row frozen</b> while scrolling, and <b>Persistence &amp; system findings</b> shows a date/time column.</li>
       <li><b>Resizable columns</b> everywhere - drag the right edge of any column header (it highlights on hover); double-click the edge to reset. Widths persist per view.</li>
+      <li><b>Containers tab (v1.9.0):</b> a dedicated <b>Containers</b> tab (left of Apache Web Server; the container table moved off Apps) scoped strictly to the evidence a UAC capture holds - point-in-time state, never presented as Docker event history. Opens with a <b>collection-coverage map</b> that distinguishes <em>present / partial / permission denied / command failed / runtime not installed / not collected by this profile</em>. <b>Runtime metadata</b> from docker/podman info+version (versions, storage/logging/cgroup drivers, security options, root dir, registries, proxies, counts) with runtime-level findings (non-loopback <b>insecure registries</b>, non-standard root dir, missing AppArmor/SELinux/seccomp, active swarm, egress proxy). The <b>inventory keeps stopped containers visible</b> (failed malware execution and terminated attacker tooling look exactly like that). Click a container for the <b>inspect deep-dive</b>: lifecycle timestamps (created/started/finished - they pivot the Timeline and join the Events axis, labelled <em>inspect-derived state</em>), exit/OOM/restart/health, execution config, <b>environment with values redacted by default</b> (names always show; LD_PRELOAD / public-endpoint / temp-path values surface as indicators), the C2/implant lens over entrypoint+cmd+health-check, <b>isolation &amp; exposure scoring</b> (privileged +3, docker.sock mount +3, host namespaces +2, sensitive mounts +2/3, dangerous CapAdd +2/3, AppArmor/seccomp unconfined +2, root+privileged/sock combo +2, 0.0.0.0 binds +1), mounts with find-in-Timeline pivots, published ports cross-checked against host <code>ss</code> listeners (corroboration, not ownership proof), and <code>docker top</code> in-container processes with clickable HOST PIDs. <b>docker diff</b> changes are counted, rolled up per top-level dir and scored for credential/PAM/persistence/ld.so/SSH/web-root/temp/hidden paths (log deletions = anti-forensics) - with the explicit caveat that diff carries <em>path + change type only</em>, no contents or hashes. Correlations: inspect <b>State.Pid → host process</b> (a flagged process escalates the container), restart-policy persistence only scores on already-suspicious containers, IOC terms sweep env/entrypoint/mounts/image. Security posture: P9 extended (docker.sock / CapAdd / unconfined) + a new runtime-hardening check; the HTML report gains a Containers section; everything exports to CSV. The tab also states what it can <b>not</b> show with these artifacts: event history, exec history, destroyed containers, container logs, diff-path contents, volume contents, image provenance.</li>
       <li><b>Persistence: structural detection + correctness (v1.8.0):</b> a second external code review drove five fixes. <b>The structural win - correlation:</b> a persistence entry's executable is now followed to a running process and its sockets, so a harmless-looking <code>ExecStart=/usr/local/bin/update-agent</code> becomes high-confidence when that binary is <em>running and holds an established public connection</em> (<b>PERS-C2</b> +3, <b>PERS-RUN</b>/<b>PERS-SUSPROC</b> for the weaker cases). Gated to non-standard-bin paths so legit /usr/sbin services aren't flagged for having a connection. <b>systemd drop-ins</b>: unit dirs are now scanned recursively, so a malicious <code>ExecStart=</code> override in <code>&lt;unit&gt;.service.d/*.conf</code> (which systemd merges over the primary unit) is finally parsed; broader load-path coverage (<code>/run</code>, <code>/usr/local/lib</code>, XDG, <code>~/.local/share</code>); and <code>.path</code>/<code>.automount</code> <code>Unit=</code> + <code>.socket</code> <code>Service=</code> trigger targets. <b>Correctness fixes:</b> the <code>ForceCommand</code> sshd check was broken (tested for the literal word in the value, so it never fired) - now flags any non-<code>none</code> value; the implant-name match was an unbounded substring (fired on <code>orbit</code> in <code>korbit</code>) - now boundary-aware (basename/path = full score, argument text = low); and <b>C2-ADDR validates octets/ports</b> so a version-like or malformed string can't become a callout. <b>SSH auth-source blind spots:</b> <code>AuthorizedKeysCommand</code>, <code>AuthorizedPrincipalsCommand/File</code>, <code>TrustedUserCAKeys</code>, <code>PermitUserEnvironment</code>, <code>~/.ssh/environment</code>. <b>PAM</b> now scans the account/password/<b>session</b> stacks (a <code>session … pam_exec.so /path/payload</code> was previously missed) and flags absolute module paths. <b>cloud-init</b> <code>scripts/per-boot|per-instance|per-once</code> (per-boot runs every boot) and user-data runcmd/bootcmd; <b>D-Bus</b> service-activation <code>Exec=</code>. <b>Tunnels:</b> <code>autossh</code>, <code>ssh -R/-D/-L</code>, cloudflared/ngrok/tailscale/frp (<b>TUNNEL</b>), plus <code>openssl enc -d</code> and <code>eval "$(base64 -d …)"</code> loaders. <b>Transparency:</b> the persistence/config inventory now lists the new sweep locations, and files skipped for exceeding the 1 MB read cap are surfaced on Log Integrity instead of silently dropped.</li>
       <li><b>Persistence C2 detection - deeper coverage (v1.7.1):</b> a review of the v1.7.0 sweeps closed several gaps. <b>The big one:</b> the "hostile-lines-only" content sweeps (profile.d, cron/init.d/network scripts, per-user rc, histories) gated on <code>HIST_PREFILTER</code> alone, so a line the C2 lens <em>would</em> flag - an implant-by-name (<code>nohup /usr/local/bin/kinsing &amp;</code>) or a reverse-shell variant with no HIST_PREFILTER token - was dropped <em>before</em> scoring; the gate now also fires on <code>implantHit</code> and <code>c2Patterns</code>, so those lines surface and score. <b>New reverse-shell variants</b> in the C2 lens: <code>php fsockopen</code>, <code>ruby TCPSocket.new</code>, <code>gawk /inet/tcp</code>, <code>/dev/udp</code>, and a <b>beacon-cadence</b> heuristic (loop + <code>sleep</code> + a network primitive → <b>BEACON</b>). <b>C2-ADDR now covers IPv6 and domains</b> (a hardcoded domain callback in a raw-socket command → <b>C2-DOMAIN</b>; internal-looking names excluded). <b>New persistence vectors:</b> systemd <code>Environment=LD_PRELOAD</code> and <code>EnvironmentFile=</code> from a writable path, a <code>.socket</code> unit's network <code>ListenStream=</code>, systemd <b>generators</b> (<code>/etc/systemd/system-generators</code>), <code>/etc/ld.so.conf.d/*.conf</code> paths outside the standard lib dirs (<b>LDPATH</b>), and <code>authorized_keys</code> <code>environment=</code> injection. The implant watchlist gained DNS/ICMP-tunnel and modern-C2 names (iodine, dns2tcp, ptunnel, pupy, revsocks, villain, hoaxshell, nimplant, …).</li>
       <li><b>RAT / C2 persistence sweeps (v1.7.0):</b> the <b>Persistence</b> tab gained the hiding spots current Linux RAT/C2 write-ups flag that the earlier sweeps missed. <b>System-wide login execution</b>: <code>/etc/profile</code>, <code>/etc/profile.d/*.sh</code>, <code>/etc/bash.bashrc</code>, <code>/etc/zsh/*</code>, <code>/etc/environment</code> (the per-user rc sweep couldn't see these). <b>SSH-login hooks</b>: <code>/etc/ssh/sshrc</code> and per-user <code>~/.ssh/rc</code> - run on <em>every</em> inbound SSH session before the shell (a favourite stealthy trigger). <b>run-parts periodic cron</b>: <code>/etc/cron.{hourly,daily,weekly,monthly}</code> (non-stock scripts) + <code>/etc/anacrontab</code>. <b>Network-event triggers</b> (beacon-on-connectivity, boot-independent): <code>NetworkManager/dispatcher.d</code>, <code>if-up.d/if-post-up.d/if-down.d</code>, <code>dhclient-exit-hooks.d</code>, <code>ppp/ip-up.d</code>. <b>Boot/device autostart</b>: <code>/etc/modules</code> &amp; <code>modules-load.d</code> (kernel-module autoload), <code>udev</code> rules with <code>RUN+=</code>/<code>PROGRAM=</code>, <code>binfmt_misc</code> handlers. <b>Legacy/other</b>: <code>/etc/rc.d/rc.local</code> (RHEL), <code>/etc/init.d</code> scripts, <code>at</code> jobs. On top of the locations, <b>every persistence command line now gets a RAT/C2 tradecraft lens</b>: reverse-shell / <code>mkfifo</code> backpipe / <code>nc -e</code> / <code>socat EXEC</code> / scripting-language connect-backs / openssl-wrapped shells (<b>REVSHELL</b>/<b>BACKPIPE</b> +3), base64/hex payloads piped to a shell (<b>ENC-LOADER</b> +2), a <b>known-implant/RAT/miner/C2 name watchlist</b> (xmrig, kinsing, bpfdoor, sliver, mythic, chisel, frpc, meterpreter, … → <b>IMPLANT</b> +3), and <b>hardcoded public callback IPs</b> baked into a cron job or unit (<b>C2-ADDR</b> +2, geo-tagged). New persistence tags carry ATT&amp;CK mappings; IMPLANT and C2-ADDR are treated as indicators (unmapped), consistent with the no-overclaim doctrine.</li>
