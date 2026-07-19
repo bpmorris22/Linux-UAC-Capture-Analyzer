@@ -67,7 +67,10 @@
   .wrap{padding:12px 14px}
   .card{background:#161b22;border:1px solid #30363d;border-radius:8px;padding:12px;margin-bottom:12px}
   .card h3{margin:0 0 8px;font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:#8b949e}
-  .subhead{margin:2px 0 6px;font-size:12px;font-weight:600;color:#c9d1d9;letter-spacing:.3px}
+  /* v1.10.1: subhead now matches the canonical section-heading look (same as .card h3 / the
+     Provisioning baseline heading) - 11px, bold, UPPERCASE, letter-spacing .5px, #8b949e. Inline
+     description spans keep their own text-transform:none / weight:400, so they read normally. */
+  .subhead{margin:2px 0 6px;font-size:11px;font-weight:700;color:#8b949e;letter-spacing:.5px;text-transform:uppercase}
   label.fld{display:block;margin:6px 0 2px;font-size:11px;color:#8b949e}
   input.txt,select,textarea{background:#1c2330;border:1px solid #30363d;color:#e6edf3;border-radius:6px;padding:5px 8px;font-size:13px;font-family:Consolas,monospace}
   input.wide{width:62%}
@@ -88,8 +91,10 @@
   .btn.iocred{background:#ffd3d3;border-color:#e06666;color:#180808}
   .btn.iocred:hover{border-color:#f0a0a0}
   /* v1.4: per-tab table heading (shared table card) */
-  .tblhead{margin:0 0 8px;font-size:13px;font-weight:600;color:#e6edf3}
-  .tblhead .d{font-size:11px;font-weight:400;color:#8b949e;text-transform:none;margin-left:8px}
+  /* v1.10.1: tab-level heading matches the canonical section-heading look (same as .card h3 / the
+     Provisioning baseline heading). Its .d description keeps its normal-case muted styling. */
+  .tblhead{margin:0 0 8px;font-size:11px;font-weight:700;color:#8b949e;letter-spacing:.5px;text-transform:uppercase}
+  .tblhead .d{font-size:11px;font-weight:400;color:#8b949e;text-transform:none;letter-spacing:0;margin-left:8px}
   /* v1.5: mini charts (div-based - HTA IE mode has no reliable canvas) */
   .chart{background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:8px 12px;margin-bottom:10px}
   .chart .ct{font-size:12px;font-weight:600;color:#e6edf3}
@@ -246,7 +251,7 @@
         <button class="btn" id="tabPersist" data-tab="persist" title="Scored persistence command lines + the persistence/config file inventory (v0.13)">Persistence</button>
         <button class="btn" id="tabActions" data-tab="actions" title="Executed shell commands from per-user bash/zsh/sh history, timestamped where HISTTIMEFORMAT/zsh extended-history is set, scored (v1.2)">Actions</button>
         <button class="btn" id="tabEvents" data-tab="events" title="One time-sorted axis merging logons, packages, boots, journal anomalies, web, audit and history events; click a timestamp to pivot the Timeline">Events</button>
-        <button class="btn" id="tabTime" data-tab="time" title="Filesystem timeline from the bodyfile (mtime/atime/ctime/crtime), scored; the pivot ±15 min target">Timeline</button>
+        <button class="btn" id="tabTime" data-tab="time" title="Filesystem timeline from the bodyfile (mtime/atime/ctime/crtime), scored; the pivot ±15 min target">Filesystem Timeline</button>
         <button class="btn" id="tabCtr" data-tab="ctr" title="Container evidence contained in this UAC capture: collection coverage, docker/podman runtime metadata, container inventory (incl. stopped), per-container inspect deep-dive (lifecycle / execution / isolation / mounts / network), docker diff filesystem changes, and cross-UAC correlations (v1.9)">Containers</button>
         <button class="btn" id="tabWeb" data-tab="web" title="Apache configuration summary (key directives from /etc/apache2 | /etc/httpd) + web-server access logs (apache/nginx/httpd combined format) - initial-access hunting">Apache Web Server</button>
         <button class="btn" id="tabAudit" data-tab="audit" title="auditd execve + login records when audit.log is in the capture (v0.11)">Audit</button>
@@ -280,10 +285,12 @@
       <!-- v1.5: provisioning baseline sits at the very top (when present), then System Overview -->
       <div id="ovCloud"></div>
       <!-- v1.4: System overview, then the sar / network / boots context blocks -->
-      <h3 style="margin-top:20px" title="Run metadata parsed from uac.log, the per-dataset counts, and the highest-scoring findings across every dataset - the at-a-glance triage summary.">System Overview</h3>
-      <div class="cards3">
+      <!-- v1.10.1: the "System Overview" heading now lives inside the first grid column so all three
+           column headings share a top edge - Datasets / Top findings no longer sit below a band of
+           empty space next to the System Overview title. -->
+      <div class="cards3" style="margin-top:20px">
         <div class="col3">
-          <!-- v0.17.1: "Run metadata" heading removed - redundant under "System overview" -->
+          <h3 title="Run metadata parsed from uac.log, the per-dataset counts, and the highest-scoring findings across every dataset - the at-a-glance triage summary.">System Overview</h3>
           <div class="kvgrid" id="ovMeta"></div>
         </div>
         <div class="col3">
@@ -513,7 +520,16 @@
 <script language="JScript">
 "use strict";
 
-var APP_VERSION = "1.10.0";
+var APP_VERSION = "1.10.1";
+/* v1.10.1 - UI consistency pass:
+   - section-heading styling unified across every tab: .tblhead (tab titles) and .subhead
+     (sub-sections) now render like the .card h3 / "Provisioning baseline" reference - 11px, bold,
+     UPPERCASE, letter-spacing .5px, #8b949e. Description spans keep their normal-case muted look.
+   - Timeline tab renamed to "Filesystem Timeline".
+   - Overview: the "System Overview" heading moved into the first grid column so all three column
+     headings (System Overview / Datasets / Top findings) share a top edge - removes the empty band
+     that used to sit above Datasets and Top findings.
+   - removed the redundant cloud-init description after the "Provisioning baseline" heading. */
 /* v1.10.0 - tab data-state coloring: every tab button is tinted light GREEN when its dataset has
    something to show and light ORANGE when it is empty (e.g. no browser DBs -> Browser is orange),
    so coverage is readable at a glance without clicking through. The selected tab keeps the blue
@@ -5622,7 +5638,7 @@ function renderOverview(){
 function cloudInitHtml(){
   if(!CLOUDINIT) return "";
   var c=CLOUDINIT, H=[];
-  H.push('<h3 title="What the cloud/hypervisor handed this VM at first boot (from cloud-init) - the provisioning baseline to compare the running host against.">Provisioning baseline <span class="muted" style="font-weight:400;text-transform:none">- How this VM was originally provisioned (cloud-init): first boot, datasource, original IP/MAC, and whether user-data scripts ran or SSH keys were injected</span></h3><div class="kvgrid">');
+  H.push('<h3 title="What the cloud/hypervisor handed this VM at first boot (from cloud-init) - the provisioning baseline to compare the running host against.">Provisioning baseline</h3><div class="kvgrid">');
   H.push(kvRow("First boot", c.firstBoot));
   if(c.ds) H.push(kvRow("Datasource", c.ds));
   if(c.ip) H.push(kvRow("Provisioned IP", c.ip+(c.mask?("  /  "+c.mask):"")));
