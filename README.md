@@ -8,7 +8,7 @@ The "**Linux**" in the name is honest scoping: several parsers (binary `wtmp`/`b
 
 ![Overview tab](screenshots/overview.png)
 
-> All screenshots use **synthetic demo data** (fictional host `web01`, documentation IPs).
+> Screenshots are from a lab capture.
 
 ## Why
 
