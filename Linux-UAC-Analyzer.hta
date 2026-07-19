@@ -79,6 +79,14 @@
   .btn.green{background:#238636;border-color:#238636;color:#fff}
   .btn.green:hover{border-color:#2ea043}
   .btn.on{background:#1f6feb;border-color:#1f6feb;color:#fff}
+  /* v1.10: tab data-state coloring - light green = tab has data, light orange = empty; the
+     selected tab keeps the blue .on style (paintTabs never sets both). */
+  .btn.hasdata{background:#cff3d9;border-color:#7bc99a;color:#0a1710}
+  .btn.hasdata:hover{border-color:#2ea043}
+  .btn.nodata{background:#ffe2c2;border-color:#e0a860;color:#1a1206}
+  .btn.nodata:hover{border-color:#e3a03a}
+  .btn.iocred{background:#ffd3d3;border-color:#e06666;color:#180808}
+  .btn.iocred:hover{border-color:#f0a0a0}
   /* v1.4: per-tab table heading (shared table card) */
   .tblhead{margin:0 0 8px;font-size:13px;font-weight:600;color:#e6edf3}
   .tblhead .d{font-size:11px;font-weight:400;color:#8b949e;text-transform:none;margin-left:8px}
@@ -203,7 +211,7 @@
     <div style="margin-top:10px">
       <button class="btn primary" id="procBtn" title="Extract (if an archive) and parse the capture into the triage views.">Analyze capture</button>
       <span class="sep"></span>
-      <button class="btn" id="iocBtn2" title="Edit the IOC / keyword list used for scoring and the tree-wide sweep.">IOC / keywords&hellip;</button>
+      <button class="btn iocred" id="iocBtn2" title="Edit the IOC / keyword list used for scoring and the tree-wide sweep.">IOC / keywords&hellip;</button>
       <button class="btn" id="logToggle">Show log</button>
       <span class="sep"></span>
       <label style="font-size:12px" id="onlineWrap" title="Look up country + ASN/org for public IPs seen in logons, network connections and web logs via ip-api.com after each Analyze. Only the bare IP list leaves this machine - no case data. Unticked (or offline.txt next to the app) = no outbound requests."><input type="checkbox" id="onlineChk" checked> Online Geo/ASN lookups</label>
@@ -505,7 +513,13 @@
 <script language="JScript">
 "use strict";
 
-var APP_VERSION = "1.9.0";
+var APP_VERSION = "1.10.0";
+/* v1.10.0 - tab data-state coloring: every tab button is tinted light GREEN when its dataset has
+   something to show and light ORANGE when it is empty (e.g. no browser DBs -> Browser is orange),
+   so coverage is readable at a glance without clicking through. The selected tab keeps the blue
+   highlight (paintTabs never applies both). Overview / Security / UAC Inventory are always green
+   (they always render). Colors refresh live on IOC re-sweep and WSL journal load. The
+   IOC / keywords button is tinted light red to stand out as the scoring/sweep control. */
 /* v1.9.0 - Containers tab (external ChatGPT review drove the design; scoped to what the UAC
    capture actually holds - point-in-time state, never presented as Docker event history):
    - new Containers tab (left of Apache Web Server); the container table moved off Apps.
@@ -5380,10 +5394,47 @@ function renderLateral(){
 }
 
 /* ---------- tab / render dispatch ---------- */
+/* v1.10: which datasets back each tab - drives the light-green (has data) / light-orange (empty)
+   tab coloring. Overview / Security / UAC Inventory always have something to show, so they are
+   always "has data". */
+var TAB_IDS={overview:"tabOverview",security:"tabSecurity",inv:"tabInv",proc:"tabProc",net:"tabNet",logon:"tabLogon",users:"tabUsers",ssh:"tabSsh",persist:"tabPersist",time:"tabTime",events:"tabEvents",ctr:"tabCtr",web:"tabWeb",audit:"tabAudit",actions:"tabActions",apps:"tabApps",browser:"tabBrowser",logs:"tabLogs",ioc:"tabIoc"};
+function anyPresent(arr){ if(!arr) return false; for(var i=0;i<arr.length;i++){ if(arr[i]&&arr[i].present) return true; } return false; }
+function tabHasData(t){
+  switch(t){
+    case "overview": case "security": case "inv": return true;
+    case "proc":    return PROC.length>0;
+    case "net":     return NET.length>0;
+    case "logon":   return LOGON.length>0 || LATERAL.length>0;
+    case "users":   return USERS.length>0;
+    case "ssh":     return SSHKEYS.length>0;
+    case "persist": return PERSFIND.length>0 || anyPresent(PERSIST);
+    case "actions": return ACTIONS.length>0;
+    case "events":  return EVENTS.length>0;
+    case "time":    return TIMEL.length>0;
+    case "ctr":     return CONTAINERS.length>0 || !!(CTRX&&CTRX.any);
+    case "web":     return WEBLOG.length>0 || !!(APACHECFG&&APACHECFG.present);
+    case "audit":   return AUDITX.length>0;
+    case "apps":    return PKGS.length>0;
+    case "browser": return BROWSERDBS.length>0;
+    case "ioc":     return IOCHITS.length>0;
+    case "logs":    return !!JOURNAL || LOGEVENTS.length>0 || INTEGRITY.length>0 || SYSLOGSVC.length>0 || (JOURNALX&&JOURNALX.events.length>0);
+  }
+  return false;
+}
+/* paint the tab bar: selected tab = blue (.on), otherwise green when it has data, orange when empty.
+   Only applied once a capture is parsed (the tab bar is hidden until then). */
+function paintTabs(){
+  var painted=(typeof LASTROOT!=="undefined" && LASTROOT);
+  for(var k in TAB_IDS){ if(!TAB_IDS.hasOwnProperty(k)) continue;
+    var el=$(TAB_IDS[k]); if(!el) continue;
+    if(k===TAB){ el.className="btn on"; }
+    else if(!painted){ el.className="btn"; }
+    else { el.className="btn "+(tabHasData(k)?"hasdata":"nodata"); }
+  }
+}
 function setTab(t, quiet){
   TAB=t;
-  var ids={overview:"tabOverview",security:"tabSecurity",inv:"tabInv",proc:"tabProc",net:"tabNet",logon:"tabLogon",users:"tabUsers",ssh:"tabSsh",persist:"tabPersist",time:"tabTime",events:"tabEvents",ctr:"tabCtr",web:"tabWeb",audit:"tabAudit",actions:"tabActions",apps:"tabApps",browser:"tabBrowser",logs:"tabLogs",ioc:"tabIoc"};
-  for(var k in ids){ if(ids.hasOwnProperty(k)){ $(ids[k]).className=(k===t)?"btn on":"btn"; } }
+  paintTabs();
   var isOv=(t==="overview"), isLogs=(t==="logs"), isEv=(t==="events");
   var isPersist=(t==="persist"), isApps=(t==="apps"), isBrowser=(t==="browser"), isSec=(t==="security"), isCtr=(t==="ctr");
   showEl("ovCard",isOv); showEl("logsCard",isLogs); showEl("eventsCard",isEv);
@@ -5434,6 +5485,7 @@ function setTblHeading(t){
   showEl("tblHeading", true);
 }
 function render(){
+  paintTabs();   // v1.10: keep the tab data-state colors current (IOC re-sweep, WSL journal load, ...)
   if(TAB==="overview"){ renderOverview(); return; }
   if(TAB==="security"){ renderSecurity(); return; }
   if(TAB==="logs"){ renderLogs(); return; }
