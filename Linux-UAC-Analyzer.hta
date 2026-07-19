@@ -523,7 +523,9 @@
 <script language="JScript">
 "use strict";
 
-var APP_VERSION = "1.10.2";
+var APP_VERSION = "1.10.3";
+/* v1.10.3 - the row-detail pane now closes automatically when you switch tabs (it belongs to the
+   tab it was opened from; leaving it open under a different tab's table was confusing). */
 /* v1.10.2 - Overview layout + white headings (operator follow-up):
    - section headings are now WHITE (#e6edf3) instead of grey across .card h3 / .tblhead / .subhead;
      their description spans stay muted grey.
@@ -5460,6 +5462,7 @@ function paintTabs(){
 function setTab(t, quiet){
   TAB=t;
   paintTabs();
+  closeDetail();   // v1.10.3: the row-detail pane belongs to the tab it was opened from - don't carry it across tabs
   var isOv=(t==="overview"), isLogs=(t==="logs"), isEv=(t==="events");
   var isPersist=(t==="persist"), isApps=(t==="apps"), isBrowser=(t==="browser"), isSec=(t==="security"), isCtr=(t==="ctr");
   showEl("ovCard",isOv); showEl("logsCard",isLogs); showEl("eventsCard",isEv);
